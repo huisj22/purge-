@@ -7,10 +7,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  # pnpm 10 的 store 位置固定，避免 runner 上的用户目录差异引入噪声
-  PNPM_HOME: ${{ github.workspace }}/.pnpm
-
 jobs:
   verify:
     name: ${{ matrix.os }} / node ${{ matrix.node }}

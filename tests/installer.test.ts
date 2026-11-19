@@ -290,3 +290,23 @@ describe("T-035 installer state machine", () => {
     assert.deepEqual(tree.map((t) => t.path), ["a.txt"]);
   });
 });
+
+describe("T-035 package exclusions", () => {
+  it("ignores tool directories such as .pnpm, dist, coverage and reports", async () => {
+    const root = path.join(base, "pkg-excl");
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "purge-plus", version: "9.9.9" }));
+    await writeFile(path.join(root, "src", "main.ts"), "export const x = 1;\n");
+    for (const dir of [".pnpm/store/v3/files/aa", "dist", "coverage", "reports", "node_modules/pkg", "references"]) {
+      await mkdir(path.join(root, dir), { recursive: true });
+      await writeFile(path.join(root, dir, "junk.bin"), "x");
+    }
+    const files = await hashTree(root);
+    const paths = files.map((f) => f.path);
+    assert.ok(paths.includes("src/main.ts"));
+    assert.ok(paths.includes("package.json"));
+    for (const dir of [".pnpm/", "dist/", "coverage/", "reports/", "node_modules/", "references/"]) {
+      assert.equal(paths.some((p) => p.startsWith(dir)), false, `must exclude ${dir}`);
+    }
+  });
+});

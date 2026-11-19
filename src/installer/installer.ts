@@ -75,7 +75,22 @@ export interface InstallResult {
   stateFile: string;
 }
 
-const EXCLUDED_DIRS = new Set(["node_modules", ".git", "_research", "references", "reports", ".purge-data", ".purge"]);
+const EXCLUDED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".pnpm",
+  ".pnpm-store",
+  ".turbo",
+  ".cache",
+  ".eslintcache",
+  "coverage",
+  "dist",
+  "_research",
+  "references",
+  "reports",
+  ".purge-data",
+  ".purge",
+]);
 const STATE_BASENAME = ".purgeplus-install-state.json";
 
 export class Installer {
