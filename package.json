@@ -5,7 +5,7 @@
   "description": "Purge+ 鈥?host-agnostic agent operations platform: discovery, diagnostics, transactional modification packs, workflow, scheduling, observability, recovery.",
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.18.0"
   },
   "bin": {
     "purgeplus": "./src/cli/main.ts"

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "phase5/**"]
   pull_request:
   workflow_dispatch:
 
@@ -13,8 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        node: ["22", "24"]
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Node 22.5–22.17 不支持默认的 TS type-stripping；本地验证基线为 24
+        node: ["24"]
     steps:
       - uses: actions/checkout@v4
 
