@@ -64,10 +64,11 @@ describe("P2-10 policy hierarchy", () => {
       subject: "exec-3",
       role: "executor",
       maxLevel: 3,
-      expiresAt: new Date(Date.now() + 50).toISOString(),
+      // durable 写入（fsync + rename + 复读）本身需要时间，TTL 必须留出余量
+      expiresAt: new Date(Date.now() + 400).toISOString(),
     });
     assert.equal((await s.evaluate({ actor: "exec-3", role: "executor", action: "pack.apply" })).decision, "allow");
-    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => setTimeout(r, 450));
     assert.equal((await s.evaluate({ actor: "exec-3", role: "executor", action: "pack.apply" })).decision, "deny");
   });
 

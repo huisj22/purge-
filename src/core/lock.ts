@@ -203,12 +203,18 @@ export class FileLock {
       const gone = `${this.dir}.released-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       try {
         await fsp.rename(this.dir, gone);
+        await fsp.rm(gone, { recursive: true, force: true }).catch(() => {});
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        this.#owner = null;
-        return { ok: true };
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          this.#owner = null;
+          return { ok: true };
+        }
+        // Windows：其它进程可能正持有该目录的句柄，rename 会 EPERM/EBUSY。
+        // 此时退回删除；读者看到"目录在、owner.json 不在"会按宽限期 BUSY 重试（见 acquire）。
+        if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw err;
+        await fsp.rm(this.dir, { recursive: true, force: true });
       }
-      await fsp.rm(gone, { recursive: true, force: true }).catch(() => {});
       this.#owner = null;
       return { ok: true };
     } catch (err) {
