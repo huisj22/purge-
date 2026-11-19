@@ -29,6 +29,7 @@ import { Scheduler, type JobSpec } from "./scheduler/scheduler.ts";
 import { evaluatePolicy, guard, type PolicyConfig, type PolicyVerdict, type ActionRequest, type GuardOptions } from "./security/policy.ts";
 import { AuditLog } from "./storage/audit.ts";
 import { type Database, openDatabase } from "./storage/database.ts";
+import { LogStore } from "./storage/logs.ts";
 import { MetricStore, TraceStore } from "./storage/trace.ts";
 import { WorkflowEngine } from "./workflow/engine.ts";
 
@@ -65,6 +66,7 @@ export interface AppServices {
   audit: AuditLog;
   traces: TraceStore;
   metrics: MetricStore;
+  logs: LogStore;
   snapshots: SnapshotStore;
   registry: HostRegistry;
   diagnostics: DiagnosticsService;
@@ -117,6 +119,9 @@ export class PurgeApp {
     const audit = new AuditLog(db);
     const traces = new TraceStore(db);
     const metrics = new MetricStore(db);
+    const logs = new LogStore(db);
+    // 把结构化日志同时落库（脱敏已在 logger 内完成），便于诊断页查询
+    this.logger = createLogger({ level: cfg.logLevel, sink: (rec) => logs.append(rec) });
     const snapshots = new SnapshotStore(dataDir, db);
     const registry = new HostRegistry({ logger: this.logger, bus: this.bus });
     const adapters: HostAdapter[] = this.#opts.adapters ?? [
@@ -181,6 +186,7 @@ export class PurgeApp {
       audit,
       traces,
       metrics,
+      logs,
       snapshots,
       registry,
       diagnostics,

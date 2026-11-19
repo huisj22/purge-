@@ -532,6 +532,22 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
       }
     }
 
+    if (resource === "logs") {
+      if (method === "GET" && !id) {
+        const level = url.searchParams.get("level") ?? undefined;
+        const contains = url.searchParams.get("contains") ?? undefined;
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        return {
+          stats: s.logs.stats(),
+          entries: s.logs.query({
+            ...(level ? { level: level as never } : {}),
+            ...(contains ? { contains } : {}),
+            limit: Number.isFinite(limit) ? limit : 100,
+          }),
+        };
+      }
+    }
+
     if (resource === "traces") {
       if (method === "GET" && !id) return s.traces.listTraces({ limit: 50 });
       if (method === "GET" && id) return s.traces.spansOf(id);

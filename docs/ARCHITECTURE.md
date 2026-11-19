@@ -235,7 +235,7 @@ begin(label)
 | GET/POST | `/api/rules` `/api/skills` | 规则与技能 |
 | GET/POST | `/api/workflows` `/api/workflows/:id/run` `/api/runs` | 工作流 |
 | GET/POST | `/api/jobs` `/api/jobs/:id/pause|resume|run` | 调度 |
-| GET | `/api/traces` `/api/traces/:id` `/api/metrics` | 可观测性 |
+| GET | `/api/traces` `/api/traces/:id` `/api/metrics` `/api/logs` | 可观测性 |
 | GET/POST | `/api/snapshots` `/api/snapshots/:id/restore` | 恢复 |
 | GET | `/api/audit` | 审计链（含链校验状态） |
 | GET/POST | `/api/plugins` `/api/plugins/install` | 插件 |

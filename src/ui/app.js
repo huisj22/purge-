@@ -862,6 +862,89 @@ async function viewOps(root) {
   );
 }
 
+async function viewObservability(root) {
+  const [traces, logs, metrics] = await Promise.all([api("/api/traces"), api("/api/logs?limit=80"), api("/api/metrics")]);
+  const levelSelect = h(
+    "select",
+    {},
+    ["", "debug", "info", "warn", "error"].map((l) => h("option", { value: l, text: l || "全部级别" })),
+  );
+  const logBox = h("div", { class: "section" });
+
+  const renderLogs = async () => {
+    const q = levelSelect.value ? `&level=${levelSelect.value}` : "";
+    const data = await api(`/api/logs?limit=80${q}`);
+    logBox.replaceChildren(
+      h("h3", { text: `日志（${data.stats.total} 条，淘汰 ${data.stats.pruned}，写失败 ${data.stats.writeErrors}）` }),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "时间" }), h("th", { text: "级别" }), h("th", { text: "消息" }), h("th", { text: "上下文" })]),
+          ...(data.entries.length
+            ? data.entries.map((e) =>
+                h("tr", {}, [
+                  h("td", { class: "mono", text: e.ts }),
+                  h("td", {}, [pill(e.level, e.level === "error" ? "bad" : e.level === "warn" ? "warn" : "muted")]),
+                  h("td", { text: e.msg }),
+                  h("td", { class: "mono", text: e.ctx ? JSON.stringify(e.ctx).slice(0, 120) : "—" }),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "4", class: "empty", text: "还没有日志" })])]),
+        ],
+      ),
+    );
+  };
+
+  root.append(
+    h("div", { class: "section" }, [
+      h("h3", { text: "Trace" }),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "traceId" }), h("th", { text: "根 span" }), h("th", { text: "span 数" }), h("th", { text: "状态" }), h("th", { text: "开始" })]),
+          ...(traces.length
+            ? traces.slice(0, 20).map((t) =>
+                h("tr", {}, [
+                  h("td", { class: "mono", text: t.traceId.slice(0, 12) }),
+                  h("td", { text: t.root }),
+                  h("td", { text: String(t.spans) }),
+                  h("td", {}, [pill(t.status, statusKind(t.status))]),
+                  h("td", { class: "mono", text: fmtTime(t.startMs) }),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "5", class: "empty", text: "还没有 trace" })])]),
+        ],
+      ),
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "指标" }),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "指标" }), h("th", { text: "样本" }), h("th", { text: "最小" }), h("th", { text: "平均" }), h("th", { text: "最大" })]),
+          ...(metrics.length
+            ? metrics.map((m) =>
+                h("tr", {}, [
+                  h("td", { class: "mono", text: m.name }),
+                  h("td", { text: String(m.stats?.count ?? 0) }),
+                  h("td", { text: m.stats ? String(Math.round(m.stats.min)) : "—" }),
+                  h("td", { text: m.stats ? String(Math.round(m.stats.avg)) : "—" }),
+                  h("td", { text: m.stats ? String(Math.round(m.stats.max)) : "—" }),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "5", class: "empty", text: "还没有指标" })])]),
+        ],
+      ),
+    ]),
+    h("div", { class: "actions" }, [levelSelect, h("button", { class: "action", text: "刷新日志", onclick: () => void renderLogs() })]),
+    logBox,
+  );
+  await renderLogs();
+}
+
 const VIEWS = {
   overview: viewOverview,
   hosts: viewHosts,
@@ -872,6 +955,7 @@ const VIEWS = {
   workflows: viewWorkflows,
   jobs: viewJobs,
   ops: viewOps,
+  observability: viewObservability,
   audit: viewAudit,
 };
 

@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { ensureDir } from "../core/atomic.ts";
 import { purgeError } from "../core/errors.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const MIGRATIONS: Array<{ version: number; apply: (db: DatabaseSync) => void }> = [
   {
@@ -109,8 +109,23 @@ const MIGRATIONS: Array<{ version: number; apply: (db: DatabaseSync) => void }> 
       `);
     },
   },
+  {
+    version: 3,
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS log(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          level TEXT NOT NULL,
+          msg TEXT NOT NULL,
+          ctx TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_log_ts ON log(ts);
+        CREATE INDEX IF NOT EXISTS idx_log_level ON log(level);
+      `);
+    },
+  },
 ];
-
 export interface Database {
   readonly raw: DatabaseSync;
   close(): void;

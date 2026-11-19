@@ -1,6 +1,6 @@
 # Purge+ project status
 
-Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **140 passed / 0 failed**
+Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **150 passed / 0 failed** + 验收 14/14
 
 ## 当前阶段
 
@@ -50,6 +50,7 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 | 技能中心（围栏导入 + 备份 + 安全提示） | `src/ruleskills/skills.ts` | `ruleskills` |
 | 插件宿主（清单/能力白名单/健康/私有存储） | `src/plugins/host.ts` | `plugins` |
 | 更新中心（离线索引/stage/activate） | `src/update/*` | `update` |
+| 日志存储（脱敏后落库 + 查询/淘汰统计） | `src/storage/logs.ts` | `logs` |
 | API（REST + 统一错误 + 审计） | `src/api/server.ts` | `api` |
 | CLI（doctor/host/diagnose/pack/snapshot/workflow/job/audit/config/policy/serve） | `src/cli/main.ts` | 实机跑通 |
 | UI（8 屏零构建 SPA） | `src/ui/*` | `api`（静态资源）+ 人工验收 |
@@ -64,7 +65,7 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 2. `recentReports` 与 workflow 共用 `run` 表（靠 `kind` 区分），缺独立表；已可用但不够干净。
 3. 诊断规则 12 条，覆盖 identity/layout/process/profile/modification/integrity；尚未覆盖磁盘空间、权限 ACL、日志增长。
 4. 修改包只支持**已解包**宿主（v0.1 明确不做归档换包），sealed 宿主返回 `unsupported` 并给出原因。
-5. UI 未做移动端适配与可访问性审计。
+5. UI 未做移动端适配与可访问性审计；观测页只做列表展示，未做火焰图/分位图。
 
 ## 下一步
 
