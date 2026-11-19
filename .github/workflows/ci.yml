@@ -2,10 +2,14 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase5/**"]
+    branches: ["main", "phase5/**", "phase5.5/**"]
     paths-ignore: ["docs/**", "**/*.md", "reports/**"]
   pull_request:
   workflow_dispatch:
+
+env:
+  # pnpm 10 的 store 位置固定，避免 runner 上的用户目录差异引入噪声
+  PNPM_HOME: ${{ github.workspace }}/.pnpm
 
 jobs:
   verify:
@@ -15,8 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
-        # Node 22.5–22.17 不支持默认的 TS type-stripping；本地验证基线为 24
-        node: ["24"]
+        # 目标矩阵：3 OS × {22, 24} = 6 组合
+        # Node 22 上 node:sqlite 仍需显式 flag；用 NODE_OPTIONS 让子进程同样生效
+        node: ["22", "24"]
+    env:
+      NODE_OPTIONS: ${{ matrix.node == '22' && '--experimental-sqlite' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,8 +36,17 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
 
-      - name: Install dependencies
+      - name: Toolchain versions
+        run: |
+          node --version
+          pnpm --version
+          node -e "console.log('NODE_OPTIONS=' + (process.env.NODE_OPTIONS || ''))"
+
+      - name: Install dependencies (bare pnpm install, no lifecycle hook)
         run: pnpm install --frozen-lockfile=false
+
+      - name: Verify install lifecycle is clean
+        run: node scripts/check-install-lifecycle.ts
 
       - name: Lint
         run: pnpm run lint
@@ -46,6 +62,7 @@ jobs:
 
       - name: Package + install smoke
         run: pnpm run ci:install
+
 
   package:
     name: build artifact
