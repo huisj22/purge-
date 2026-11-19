@@ -452,7 +452,14 @@ export class SnapshotStore {
           if (entry.hash && after !== entry.hash) throw new Error(`post-write hash mismatch (${after})`);
           restored.push(entry.path);
         } else if (entry.type === "absent") {
-          await fsp.rm(entry.path, { force: true, recursive: false });
+          // 跨平台差异：当父路径是文件时，POSIX 返回 ENOTDIR，Windows 返回 ENOENT。
+          // 两种情况都表示"该路径不可能存在"，因此"确保其不存在"已满足，不算失败。
+          try {
+            await fsp.rm(entry.path, { force: true, recursive: false });
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+          }
           removed.push(entry.path);
         } else if (entry.type === "dir") {
           await ensureDir(entry.path);
