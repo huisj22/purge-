@@ -63,15 +63,15 @@
 
 | # | 原功能 | 实现位置 | 工作机制 | 原限制 | Purge+ 模块 | 策略 | 实现 | 测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| D1 | 更新检查（版本/通道） | `update.js:136-141`、`update-policy.js` | running vs installed 分开 | 版本源单一 | `update/checker.ts`（离线优先 index） | REFACTOR | planned | — |
-| D2 | 下载 + SHA256/digest 校验 | `community.js:895-925` | 官方摘要为权威，镜像只传输 | — | 同上 | KEEP | planned | — |
-| D3 | 镜像/代理/token/SOCKS | `update-http.js`、`update-socks.js` | token 只发 api.github.com；NO_PROXY | PAC 不支持 | `update/transport.ts` | IMPROVE | planned | — |
-| D4 | 分阶段安装（备份→装→验→回滚） | `update.js:869-988` | 失败回滚依赖图 | 写入口不统一 | `update/staged.ts` + Transaction | REFACTOR | planned | — |
+| D1 | 更新检查（版本/通道） | `update.js:136-141`、`update-policy.js` | running vs installed 分开 | 版本源单一 | `src/update/service.ts` + `version.ts`（离线 index，semver 比较） | REFACTOR | done | `tests/update.test.ts` |
+| D2 | 下载 + SHA256/digest 校验 | `community.js:895-925` | 官方摘要为权威，镜像只传输 | — | `stage()`：大小+sha256 双校验，不符即清理 staging | KEEP | done | `tests/update.test.ts` |
+| D3 | 镜像/代理/token/SOCKS | `update-http.js`、`update-socks.js` | token 只发 api.github.com；NO_PROXY | PAC 不支持 | 可注入 fetcher（v0.1 不做镜像/代理） | IMPROVE | planned | —（v0.3） |
+| D4 | 分阶段安装（备份→装→验→回滚） | `update.js:869-988` | 失败回滚依赖图 | 写入口不统一 | `plan→stage→verify→activate`，失败保留旧指针 | REFACTOR | done | `tests/update.test.ts` |
 | D5 | 非空互斥维护锁 | `maintenance-lock.js:35-167` | 记录+PID死亡+生日证明 | 跨机不可读即阻断 | `recovery/lock.ts` | KEEP | planned | — |
 | D6 | 备份/回滚/prune/usage | `community.js:495-690` | CAS manifest + 走官方 CLI 回滚 | 回滚语义两处 | `recovery/snapshot.ts` | REFACTOR | done（快照/GC） | `tests/recovery.test.ts` |
 | D7 | 引导安装器（零依赖下载） | `bootstrap-install.mjs` | 自带下载器，无 node_modules | 曾因 yaml 顶层依赖失败 | `cli install`（依赖自带） | REFACTOR | planned | — |
 | D8 | 别名迁移 dsh-purge→community | `market-migration.js` | 精确包名迁移 | 写侧被拉回新名 | — | DEFER（无历史包袱） | — | — |
-| D9 | 自动更新偏好持久化 | `update-policy.js:11-17` | 检查/安装分文件 | — | `core/config.ts` | KEEP | done | `tests/config.test.ts` |
+| D9 | 自动更新偏好持久化 | `update-policy.js:11-17` | 检查/安装分文件 | — | `core/config.ts`（update.channel/indexUrl） | KEEP | done | `tests/config.test.ts` |
 
 ## E. 诊断与恢复
 

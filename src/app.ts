@@ -17,6 +17,8 @@ import { createLogger, type Logger } from "./core/logger.ts";
 import { DiagnosticsService } from "./inspector/diagnostics.ts";
 import { PackEngine } from "./packs/engine.ts";
 import { PackStore } from "./packs/store.ts";
+import { PluginHost } from "./plugins/host.ts";
+import { UpdateService } from "./update/service.ts";
 import { RuleStore } from "./ruleskills/rules.ts";
 import { SkillLibrary } from "./ruleskills/skills.ts";
 import { HostRegistry } from "./registry/registry.ts";
@@ -67,6 +69,8 @@ export interface AppServices {
   diagnostics: DiagnosticsService;
   workflow: WorkflowEngine;
   scheduler: Scheduler;
+  plugins: PluginHost;
+  updates: UpdateService;
   rules: RuleStore;
   skills: SkillLibrary;
   packs: PackStore;
@@ -122,6 +126,19 @@ export class PurgeApp {
     ];
     for (const adapter of adapters) registry.addAdapter(adapter);
     const diagnostics = new DiagnosticsService({ registry, db, audit, traces, metrics, logger: this.logger, bus: this.bus });
+    const servicesRef: { value: AppServices | null } = { value: null };
+    const plugins = new PluginHost({
+      dataDir,
+      logger: this.logger,
+      resolveService: (capability) => resolveCapability(servicesRef.value, capability),
+    });
+    const updates = new UpdateService({
+      dataDir,
+      currentVersion: APP_VERSION,
+      logger: this.logger,
+      channel: cfg.update.channel,
+      ...(cfg.update.indexUrl ? { indexSource: cfg.update.indexUrl } : {}),
+    });
     const rules = new RuleStore(dataDir);
     const skills = new SkillLibrary(dataDir);
     const packs = new PackStore(dataDir);
@@ -166,6 +183,8 @@ export class PurgeApp {
       diagnostics,
       workflow,
       scheduler,
+      plugins,
+      updates,
       rules,
       skills,
       packs,
@@ -173,6 +192,7 @@ export class PurgeApp {
       logger: this.logger,
       bus: this.bus,
     };
+    servicesRef.value = services;
     this.#services = services;
     if (this.#opts.startScheduler !== false) scheduler.start();
     this.#started = true;
@@ -228,6 +248,29 @@ export class PurgeApp {
     });
     return { verdict, result };
   }
+}
+
+/** 插件能力名 → 服务实例。只暴露只读/受控能力，不暴露 kernel 与 db。 */
+function resolveCapability(services: AppServices | null, capability: string): unknown {
+  if (!services) throw new Error(`services not ready yet (capability "${capability}")`);
+  const map: Record<string, unknown> = {
+    diagnostics: services.diagnostics,
+    registry: services.registry,
+    rules: services.rules,
+    skills: services.skills,
+    packs: services.packs,
+    workflow: services.workflow,
+    scheduler: services.scheduler,
+    audit: services.audit,
+    snapshots: services.snapshots,
+    traces: services.traces,
+    metrics: services.metrics,
+    config: services.config,
+    updates: services.updates,
+  };
+  const found = map[capability];
+  if (!found) throw new Error(`unknown capability: ${capability}`);
+  return found;
 }
 
 function registerDefaultExecutors(

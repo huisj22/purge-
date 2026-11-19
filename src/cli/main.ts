@@ -50,6 +50,8 @@ const HELP = `Purge+ ${APP_VERSION}
   pack list|import <file>|plan <id> <hostId>|apply <id> <hostId>|revert <snapshotId>
   rule list|add <id> <title> --body <text>|show <id>|on|off|rm <id>|compose [--workspace <dir>]
   skill list|scan <root>|add <dir> [--overwrite]|rm <name>
+  plugin list|install <dir> [--overwrite]|enable <name>|disable <name>|health <name>|invoke <name> <method> [json]|rm <name>
+  update status|check [--index <file|url>]|plan [version]|apply [version]
   workflow list|run <id>|runs
   job list|add <id> <workflowId> <cron|间隔秒>|pause <id>|resume <id>|rm <id>
   audit [--limit N]               审计（含链校验）
@@ -416,6 +418,103 @@ async function main(argv: string[]): Promise<number> {
         if ((sub === "rm" || sub === "remove") && rest[0]) {
           await app.guarded("cli", { action: "config.set", target: `skill:${rest[0]}`, paths: [s.skills.dir], origin: "human" }, () => s.skills.remove(rest[0] as string), { confirmed: true });
           out({ removed: rest[0] }, `已删除技能 ${rest[0]}`);
+          return EXIT.ok;
+        }
+        break;
+      }
+
+      case "plugin": {
+        if (sub === "list") {
+          const list = await s.plugins.list();
+          out(
+            list.map((p) => ({ name: p.manifest.name, version: p.manifest.version, state: p.state, capabilities: p.manifest.capabilities, error: p.error })),
+            list.map((p) => `${p.manifest.name}@${p.manifest.version}\t${p.state}\t[${p.manifest.capabilities.join(",")}]${p.error ? `\t${p.error}` : ""}`).join("\n") || "还没有插件",
+          );
+          return EXIT.ok;
+        }
+        if (sub === "install" && rest[0]) {
+          const { result } = await app.guarded(
+            "cli",
+            { action: "plugin.install", target: rest[0], paths: [s.plugins.dir], origin: "human" },
+            () => s.plugins.install(path.resolve(rest[0] as string), { overwrite: rest.includes("--overwrite") }),
+            { confirmed: flags.yes },
+          );
+          out(result, `已安装 ${result.manifest.name}@${result.manifest.version}（${result.state}）`);
+          return EXIT.ok;
+        }
+        if (sub === "enable" && rest[0]) {
+          const { result } = await app.guarded("cli", { action: "plugin.enable", target: rest[0], origin: "human" }, () => s.plugins.enable(rest[0] as string), { confirmed: flags.yes });
+          out(result, `${result.manifest.name} → ${result.state}`);
+          return EXIT.ok;
+        }
+        if (sub === "disable" && rest[0]) {
+          const { result } = await app.guarded("cli", { action: "plugin.disable", target: rest[0], origin: "human" }, () => s.plugins.disable(rest[0] as string), { confirmed: flags.yes });
+          out(result, `${result.manifest.name} → ${result.state}`);
+          return EXIT.ok;
+        }
+        if (sub === "health" && rest[0]) {
+          const health = await s.plugins.health(rest[0]);
+          out(health, `${rest[0]}: ${health.ok ? "健康" : "异常"}（${health.state}）${health.detail ? ` — ${health.detail}` : ""}`);
+          return health.ok ? EXIT.ok : EXIT.failed;
+        }
+        if (sub === "invoke" && rest[0] && rest[1]) {
+          let args: unknown = {};
+          if (rest[2]) {
+            try {
+              args = JSON.parse(rest[2]);
+            } catch {
+              throw new PurgeError({ code: "invalid_argument", message: "第三个参数必须是 JSON" });
+            }
+          }
+          const result = await s.plugins.invoke(rest[0] as string, rest[1] as string, args);
+          out(result, JSON.stringify(result, null, 2));
+          return EXIT.ok;
+        }
+        if ((sub === "rm" || sub === "remove") && rest[0]) {
+          await app.guarded("cli", { action: "plugin.remove", target: rest[0], origin: "human" }, () => s.plugins.remove(rest[0] as string), { confirmed: true });
+          out({ removed: rest[0] }, `已删除插件 ${rest[0]}`);
+          return EXIT.ok;
+        }
+        break;
+      }
+
+      case "update": {
+        if (sub === "status" || !sub) {
+          const status = await s.updates.status();
+          out({ current: APP_VERSION, ...status }, `当前 ${APP_VERSION}${status.activeVersion ? ` · 已激活 ${status.activeVersion}` : ""}${status.lastCheck ? ` · 上次检查 ${status.lastCheck.checkedAt}（latest=${status.lastCheck.latest ?? "-"}）` : ""}`);
+          return EXIT.ok;
+        }
+        if (sub === "check") {
+          const idxFlag = rest.indexOf("--index");
+          const indexSource = idxFlag >= 0 ? rest[idxFlag + 1] : undefined;
+          const index = indexSource ? await s.updates.loadIndex(indexSource) : undefined;
+          const check = await s.updates.check(index ? { index } : {});
+          out(check, `当前 ${check.current} · 最新 ${check.latest ?? "-"} · ${check.hasUpdate ? "有更新" : "已是最新"}${check.note ? `（${check.note}）` : ""}`);
+          return EXIT.ok;
+        }
+        if (sub === "plan") {
+          const idxFlag = rest.indexOf("--index");
+          const indexSource = idxFlag >= 0 ? rest[idxFlag + 1] : undefined;
+          const index = indexSource ? await s.updates.loadIndex(indexSource) : undefined;
+          const plan = await s.updates.plan(rest.find((a) => !a.startsWith("--") && a !== indexSource), index ? { index } : {});
+          out(plan, `${plan.from} → ${plan.to}（${plan.artifacts.length} 个产物）${plan.notes ? `\n${plan.notes}` : ""}`);
+          return EXIT.ok;
+        }
+        if (sub === "apply") {
+          const idxFlag = rest.indexOf("--index");
+          const indexSource = idxFlag >= 0 ? rest[idxFlag + 1] : undefined;
+          const index = indexSource ? await s.updates.loadIndex(indexSource) : undefined;
+          const plan = await s.updates.plan(rest.find((a) => !a.startsWith("--") && a !== indexSource), index ? { index } : {});
+          const { result } = await app.guarded(
+            "cli",
+            { action: "update.apply", target: `${plan.from}->${plan.to}`, paths: [s.updates.dir], origin: "human" },
+            async () => {
+              const staged = await s.updates.stage(plan);
+              return s.updates.activate(staged);
+            },
+            { confirmed: flags.yes, forceConfirm: true },
+          );
+          out(result, `已激活 ${result.version}${result.previous ? `（上一版本 ${result.previous}）` : ""}`);
           return EXIT.ok;
         }
         break;

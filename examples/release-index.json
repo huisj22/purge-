@@ -1,0 +1,18 @@
+{
+  "schema": "purgeplus.release-index/1",
+  "channel": "stable",
+  "releases": [
+    {
+      "version": "0.2.0",
+      "notes": "演示版本：仅用于验证 check/plan/stage/activate 流程",
+      "artifacts": [
+        {
+          "name": "payload.bin",
+          "source": "D:/Purge+/examples/release-artifact.bin",
+          "sha256": "628c185773fe4fe4e30bae19858817fb7673017b77d22d2a3ace173d33913232",
+          "size": 29
+        }
+      ]
+    }
+  ]
+}

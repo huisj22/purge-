@@ -35,6 +35,13 @@ node src/cli/main.ts pack revert <snapshotId> --yes       # 用快照精确还�
 node src/cli/main.ts snapshot capture <label> <path...> --yes
 node src/cli/main.ts workflow run healthcheck
 node src/cli/main.ts job add nightly healthcheck "0 3 * * *" --yes
+node src/cli/main.ts rule add my-rule "标题" --body "规则正文" --yes
+node src/cli/main.ts rule compose --workspace .
+node src/cli/main.ts skill add ./my-skill
+node src/cli/main.ts plugin install ./examples/demo-plugin --yes
+node src/cli/main.ts plugin enable purge-example-plugin --yes
+node src/cli/main.ts plugin invoke purge-example-plugin recent '{\"limit\":2}'
+node src/cli/main.ts update check --index examples/release-index.json
 node src/cli/main.ts audit --limit 20
 ```
 
@@ -105,7 +112,7 @@ adapters(dsh/asar) · storage(sqlite)                     ← 适配层
 ## 开发
 
 ```bash
-node --test "tests/**/*.test.ts"   # 当前 106 项，全绿
+node --test "tests/**/*.test.ts"   # 当前 140 项，全绿
 pnpm i && npx tsc --noEmit        # 类型检查（已通过，0 错误）
 ```
 

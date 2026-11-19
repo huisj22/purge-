@@ -417,6 +417,87 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
       }
     }
 
+    if (resource === "plugins") {
+      if (method === "GET" && !id) return s.plugins.list();
+      if (method === "GET" && id && action === "health") return s.plugins.health(id);
+      if (method === "POST" && id === "install") {
+        const body = await readJson(req, maxBody);
+        const source = String(body.path ?? "");
+        if (!source) throw purgeError("invalid_argument", "path is required");
+        const { result } = await app.guarded(
+          "api",
+          { action: "plugin.install", target: source, paths: [s.plugins.dir], origin: "human" },
+          () => s.plugins.install(source, { overwrite: body.overwrite === true }),
+          { confirmed: body.confirm === true },
+        );
+        return result;
+      }
+      if (method === "POST" && id && action) {
+        const body = await readJson(req, maxBody);
+        if (action === "enable") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "plugin.enable", target: id, origin: "human" },
+            () => s.plugins.enable(id),
+            { confirmed: body.confirm === true },
+          );
+          return result;
+        }
+        if (action === "disable") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "plugin.disable", target: id, origin: "human" },
+            () => s.plugins.disable(id),
+            { confirmed: body.confirm === true },
+          );
+          return result;
+        }
+        if (action === "remove") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "plugin.remove", target: id, origin: "human" },
+            () => s.plugins.remove(id),
+            { confirmed: true },
+          );
+          return result;
+        }
+      }
+    }
+
+    if (resource === "update") {
+      if (method === "GET" && !id) return { status: await s.updates.status(), current: APP_VERSION };
+      if (method === "POST" && id === "check") {
+        const body = await readJson(req, maxBody);
+        const src = typeof body.index === "string" ? body.index : undefined;
+        const index = src ? await s.updates.loadIndex(src) : undefined;
+        return s.updates.check(index ? { index } : {});
+      }
+      if (method === "POST" && id === "plan") {
+        const body = await readJson(req, maxBody);
+        const version = typeof body.version === "string" ? body.version : undefined;
+        const src = typeof body.index === "string" ? body.index : undefined;
+        const index = src ? await s.updates.loadIndex(src) : undefined;
+        return s.updates.plan(version, index ? { index } : {});
+      }
+      if (method === "POST" && id === "apply") {
+        const body = await readJson(req, maxBody);
+        const version = typeof body.version === "string" ? body.version : undefined;
+        const src = typeof body.index === "string" ? body.index : undefined;
+        const index = src ? await s.updates.loadIndex(src) : undefined;
+        const plan = await s.updates.plan(version, index ? { index } : {});
+        const { result } = await app.guarded(
+          "api",
+          { action: "update.apply", target: `${plan.from}->${plan.to}`, paths: [s.updates.dir], origin: "human" },
+          async () => {
+            const staged = await s.updates.stage(plan);
+            return s.updates.activate(staged);
+          },
+          { confirmed: body.confirm === true, forceConfirm: true },
+        );
+        return result;
+      }
+    }
+
     if (resource === "traces") {
       if (method === "GET" && !id) return s.traces.listTraces({ limit: 50 });
       if (method === "GET" && id) return s.traces.spansOf(id);

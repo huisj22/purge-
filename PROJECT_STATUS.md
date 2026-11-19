@@ -1,12 +1,13 @@
 # Purge+ project status
 
-Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）进行中 · 测试 **106 passed / 0 failed**
+Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **140 passed / 0 failed**
 
 ## 当前阶段
 
-Phase 0（原项目研究）、Phase 1（设计）、Phase 2（核心框架）完成，Phase 3/4 的核心部分已落地：
-内核、存储与哈希链审计、事务与快照、ASAR 与宿主适配、宿主注册表、规则化诊断、修改包引擎、工作流、调度、策略、API、CLI、UI。
-**尚未实现**：配置中心的多目标 diff/冲突、规则与技能中心、插件宿主、更新中心、安装器（见 TASKS.md）。
+Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落地：
+内核、存储与哈希链审计、事务与快照、ASAR 与宿主适配、注册表、规则化诊断、修改包引擎、规则/技能中心、
+插件宿主（能力白名单）、更新中心（离线索引 + 分阶段）、工作流、调度、策略、API、CLI、UI。
+**仍未实现**：配置中心的多目标 diff/冲突预演、安装器（`install --verify-first`）、镜像/代理传输、归档换包（v0.3 计划）、端到端验收脚本。
 
 ## 本机真实跑过的命令（不是声明）
 
@@ -21,6 +22,11 @@ Phase 0（原项目研究）、Phase 1（设计）、Phase 2（核心框架）�
 | `node src/cli/main.ts job add nightly healthcheck "0 3 * * *" --yes` | `next=2026-11-19T19:00:00.000Z`（= 本地次日 03:00） |
 | `node src/cli/main.ts pack import examples/pack-template.json --yes` | `已导入 example-template@0.0.1（f305d8ed3911）` |
 | `node src/cli/main.ts pack plan example-template dsh@24d1d554` | 只读预演：`[missing] demo-code …（声明为可缺省）`，exit 0 |
+| `node src/cli/main.ts rule add greet "打招呼" --body "总是先向用户问好" --yes` | `已创建规则 greet（v1）` |
+| `node src/cli/main.ts rule compose` | `### 打招呼 (greet)` + 正文 |
+| `node src/cli/main.ts plugin install examples\demo-plugin --yes` → `enable` → `invoke recent` | 装了插件、启用了插件，`invoke` 通过被授予的 `diagnostics` 能力读到真实诊断记录 |
+| `node src/cli/main.ts update check --index examples\release-index.json` | `当前 0.1.0-alpha.1 · 最新 0.2.0 · 有更新` |
+| `node src/cli/main.ts update apply --yes --index …` | 隔离目录内 `已激活 0.2.0`，落盘 `versions/0.2.0/{payload.bin,manifest.json}`
 | `node src/cli/main.ts serve` + curl | `/api/health` ok · `/` 1310 B · `/app.js` 26800 B · `/api/overview` 读到真实宿主与审计校验 |
 | ASAR 头读取 | 209 MB 归档 65 ms 读出 `package.json` |
 
@@ -38,13 +44,17 @@ Phase 0（原项目研究）、Phase 1（设计）、Phase 2（核心框架）�
 | 工作流（DAG/并行/重试/超时/取消/恢复） | `src/workflow/*` | `workflow` |
 | 调度（interval + cron-lite + 互斥 + 持久化） | `src/scheduler/*` | `scheduler` |
 | 策略（风险评分/allow-confirm-deny/AI 不降级） | `src/security/policy.ts` | `policy` |
+| 规则中心（多槽位 + 组装） | `src/ruleskills/rules.ts` | `ruleskills` |
+| 技能中心（围栏导入 + 备份 + 安全提示） | `src/ruleskills/skills.ts` | `ruleskills` |
+| 插件宿主（清单/能力白名单/健康/私有存储） | `src/plugins/host.ts` | `plugins` |
+| 更新中心（离线索引/stage/activate） | `src/update/*` | `update` |
 | API（REST + 统一错误 + 审计） | `src/api/server.ts` | `api` |
 | CLI（doctor/host/diagnose/pack/snapshot/workflow/job/audit/config/policy/serve） | `src/cli/main.ts` | 实机跑通 |
 | UI（8 屏零构建 SPA） | `src/ui/*` | `api`（静态资源）+ 人工验收 |
 
 ## 进行中
 
-- 规则/技能中心、配置中心多目标 diff、插件宿主、更新中心（T-018/019/020）
+- 配置中心的多目标 diff / 冲突预演（T-023）、端到端验收脚本（T-022）
 
 ## 已知问题
 

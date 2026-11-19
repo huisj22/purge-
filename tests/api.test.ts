@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -295,6 +296,31 @@ describe("http api", () => {
     assert.equal(removed.status, 200);
     const after = await api<Array<unknown>>(base, "GET", "/api/skills");
     assert.deepEqual(after.json.data, []);
+  });
+
+  it("exposes update check and plan over the api", async () => {
+    const artifact = path.join(tmp, "payload.bin");
+    await writeFile(artifact, "payload-v2", "utf8");
+    const hash = createHash("sha256").update("payload-v2").digest("hex");
+    const indexFile = path.join(tmp, "index.json");
+    await writeFile(
+      indexFile,
+      JSON.stringify({
+        schema: "purgeplus.release-index/1",
+        channel: "stable",
+        releases: [{ version: "9.9.9", artifacts: [{ name: "payload.bin", source: artifact, sha256: hash, size: 10 }] }],
+      }),
+      "utf8",
+    );
+    const status = await api<{ current: string }>(base, "GET", "/api/update");
+    assert.match(status.json.data?.current ?? "", /^\d+\.\d+\.\d+/);
+    const check = await api<{ hasUpdate: boolean; latest: string }>(base, "POST", "/api/update/check", { index: indexFile });
+    assert.equal(check.json.data?.latest, "9.9.9");
+    assert.equal(check.json.data?.hasUpdate, true);
+    const plan = await api<{ to: string; artifacts: unknown[] }>(base, "POST", "/api/update/plan", { index: indexFile, version: "9.9.9" });
+    assert.equal(plan.json.data?.to, "9.9.9");
+    const noConfirm = await api(base, "POST", "/api/update/apply", { index: indexFile, version: "9.9.9" });
+    assert.equal(noConfirm.status, 428, "update apply must require confirmation");
   });
 
   it("serves the ui shell and its assets", async () => {

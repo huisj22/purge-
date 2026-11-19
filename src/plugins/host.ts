@@ -1,0 +1,374 @@
+/**
+ * 插件宿主：清单校验 / 安装（内容寻址）/ 启停 / 能力白名单 / 健康检查。
+ *
+ * 设计（见 MASTER_PROMPT §5.12 与安全评审 §4）：
+ * - 插件是**受能力约束的进程内模块**：只能拿到 manifest.capabilities 声明的服务。
+ * - 越权访问抛 CapabilityError，不靠"插件自觉"。
+ * - 安装时复制到 <dataDir>/plugins/<name>@<version>/，记录文件树哈希；
+ *   同名不同内容 = 冲突，不静默覆盖。
+ * - 加载失败只把该插件标记 broken，不影响其它插件与宿主。
+ */
+import { createHash } from "node:crypto";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import { atomicWriteFile, ensureDir, readJson, removeTreeNoFollow, sha256File } from "../core/atomic.ts";
+import { asPurgeError, purgeError } from "../core/errors.ts";
+import type { Logger } from "../core/logger.ts";
+
+export const PLUGIN_API_VERSION = "1";
+
+export interface PluginManifest {
+  name: string;
+  version: string;
+  apiVersion: string;
+  entry: string;
+  description?: string;
+  /** 允许访问的宿主服务名（白名单）。 */
+  capabilities: string[];
+  /** 声明式权限说明，仅用于展示与审计。 */
+  permissions?: string[];
+}
+
+export interface PluginContext {
+  readonly name: string;
+  readonly version: string;
+  readonly dataDir: string;
+  log: (level: "debug" | "info" | "warn" | "error", msg: string, ctx?: unknown) => void;
+  /** 取一个已声明的服务；未声明 → CapabilityError。 */
+  use<T>(service: string): T;
+  /** 插件私有 KV（落在插件数据目录）。 */
+  store: {
+    get<T>(key: string): Promise<T | undefined>;
+    set(key: string, value: unknown): Promise<void>;
+  };
+}
+
+export interface PluginInstance {
+  activate?(ctx: PluginContext): void | Promise<void>;
+  deactivate?(): void | Promise<void>;
+  health?(): { ok: boolean; detail?: string } | Promise<{ ok: boolean; detail?: string }>;
+  invoke?(method: string, args: unknown): unknown | Promise<unknown>;
+}
+
+export type PluginState = "enabled" | "disabled" | "broken";
+
+export interface InstalledPlugin {
+  manifest: PluginManifest;
+  dir: string;
+  state: PluginState;
+  hash: string;
+  installedAt: string;
+  error?: string;
+}
+
+export interface PluginHostOptions {
+  dataDir: string;
+  logger: Logger;
+  /** 服务解析器：能力名 → 服务实例。由组合根注入（通常是 kernel.get）。 */
+  resolveService: (name: string) => unknown;
+}
+
+interface StateFile {
+  plugins: Array<{ name: string; version: string; state: PluginState; installedAt: string; enabled: boolean }>;
+}
+
+const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+export class PluginHost {
+  readonly dir: string;
+  readonly stateFile: string;
+  readonly #o: PluginHostOptions;
+  readonly #instances = new Map<string, PluginInstance>();
+
+  constructor(opts: PluginHostOptions) {
+    this.#o = opts;
+    this.dir = path.join(opts.dataDir, "plugins");
+    this.stateFile = path.join(opts.dataDir, "plugin-state.json");
+  }
+
+  async list(): Promise<InstalledPlugin[]> {
+    await ensureDir(this.dir);
+    const state = await this.#state();
+    const entries = await fsp.readdir(this.dir, { withFileTypes: true }).catch(() => []);
+    const out: InstalledPlugin[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const dir = path.join(this.dir, entry.name);
+      const manifestPath = path.join(dir, "plugin.json");
+      try {
+        const manifest = await this.#readManifest(manifestPath);
+        const record = state.plugins.find((p) => p.name === manifest.name && p.version === manifest.version);
+        out.push({
+          manifest,
+          dir,
+          state: record?.state ?? "disabled",
+          hash: await this.#treeHash(dir),
+          installedAt: record?.installedAt ?? new Date(0).toISOString(),
+        });
+      } catch (err) {
+        out.push({
+          manifest: { name: entry.name, version: "?", apiVersion: "?", entry: "", capabilities: [] },
+          dir,
+          state: "broken",
+          hash: "",
+          installedAt: new Date(0).toISOString(),
+          error: asPurgeError(err).message,
+        });
+      }
+    }
+    return out.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
+  }
+
+  async install(sourceDir: string, opts: { overwrite?: boolean } = {}): Promise<InstalledPlugin> {
+    const src = path.resolve(sourceDir);
+    const manifest = await this.#readManifest(path.join(src, "plugin.json"));
+    const dest = path.join(this.dir, `${manifest.name}@${manifest.version}`);
+    const destExists = await fsp.stat(dest).then((s) => s.isDirectory()).catch(() => false);
+    const srcHash = await this.#treeHash(src);
+    if (destExists) {
+      const destHash = await this.#treeHash(dest);
+      if (destHash === srcHash) {
+        return { manifest, dir: dest, state: (await this.#stateOf(manifest.name, manifest.version)) ?? "disabled", hash: destHash, installedAt: new Date().toISOString() };
+      }
+      if (opts.overwrite !== true) {
+        throw purgeError("conflict", `plugin ${manifest.name}@${manifest.version} already installed with different content`, {
+          installed: destHash,
+          incoming: srcHash,
+        });
+      }
+      await removeTreeNoFollow(dest);
+    }
+    await ensureDir(this.dir);
+    await copyDir(src, dest);
+    const installedHash = await this.#treeHash(dest);
+    if (installedHash !== srcHash) {
+      await removeTreeNoFollow(dest);
+      throw purgeError("integrity_failed", "installed plugin content differs from source", { expected: srcHash, actual: installedHash });
+    }
+    const state = await this.#state();
+    state.plugins = state.plugins.filter((p) => !(p.name === manifest.name && p.version === manifest.version));
+    state.plugins.push({ name: manifest.name, version: manifest.version, state: "disabled", installedAt: new Date().toISOString(), enabled: false });
+    await this.#saveState(state);
+    return { manifest, dir: dest, state: "disabled", hash: installedHash, installedAt: new Date().toISOString() };
+  }
+
+  async enable(name: string): Promise<InstalledPlugin> {
+    const plugin = await this.#find(name);
+    const instance = await this.#load(plugin);
+    const state = await this.#state();
+    const record = state.plugins.find((p) => p.name === name);
+    if (record) {
+      record.state = "enabled";
+      record.enabled = true;
+    }
+    await this.#saveState(state);
+    this.#instances.set(name, instance);
+    return { ...plugin, state: "enabled" };
+  }
+
+  async disable(name: string): Promise<InstalledPlugin> {
+    const instance = this.#instances.get(name);
+    if (instance?.deactivate) {
+      try {
+        await instance.deactivate();
+      } catch (err) {
+        this.#o.logger.warn("plugin deactivate failed", { name, error: asPurgeError(err).message });
+      }
+    }
+    this.#instances.delete(name);
+    const plugin = await this.#find(name);
+    const state = await this.#state();
+    const record = state.plugins.find((p) => p.name === name);
+    if (record) {
+      record.state = "disabled";
+      record.enabled = false;
+    }
+    await this.#saveState(state);
+    return { ...plugin, state: "disabled" };
+  }
+
+  async health(name: string): Promise<{ ok: boolean; state: PluginState; detail?: string }> {
+    const plugin = await this.#find(name);
+    if (plugin.state !== "enabled") return { ok: false, state: plugin.state, detail: "插件未启用" };
+    const instance = this.#instances.get(name);
+    if (!instance) {
+      try {
+        this.#instances.set(name, await this.#load(plugin));
+      } catch (err) {
+        return { ok: false, state: "broken", detail: asPurgeError(err).message };
+      }
+    }
+    const inst = this.#instances.get(name);
+    if (!inst?.health) return { ok: true, state: "enabled", detail: "未实现 health()，视为已加载" };
+    try {
+      const r = await inst.health();
+      return { ok: r.ok, state: r.ok ? "enabled" : "broken", detail: r.detail };
+    } catch (err) {
+      return { ok: false, state: "broken", detail: asPurgeError(err).message };
+    }
+  }
+
+  /** 调用插件方法（受启用状态约束）。 */
+  async invoke(name: string, method: string, args: unknown): Promise<unknown> {
+    const plugin = await this.#find(name);
+    if (plugin.state !== "enabled") throw purgeError("conflict", `plugin is not enabled: ${name}`, { state: plugin.state });
+    let instance = this.#instances.get(name);
+    if (!instance) {
+      instance = await this.#load(plugin);
+      this.#instances.set(name, instance);
+    }
+    if (!instance.invoke) throw purgeError("unsupported", `plugin ${name} does not export invoke()`);
+    return instance.invoke(method, args);
+  }
+
+  async remove(name: string): Promise<{ removed: string }> {
+    const plugin = await this.#find(name);
+    if (plugin.state === "enabled") await this.disable(name);
+    await removeTreeNoFollow(plugin.dir);
+    const state = await this.#state();
+    state.plugins = state.plugins.filter((p) => p.name !== name);
+    await this.#saveState(state);
+    return { removed: plugin.dir };
+  }
+
+  async #load(plugin: InstalledPlugin): Promise<PluginInstance> {
+    const entryPath = path.join(plugin.dir, plugin.manifest.entry);
+    const normalized = path.resolve(entryPath);
+    if (!normalized.startsWith(path.resolve(plugin.dir) + path.sep)) {
+      throw purgeError("policy_denied", `plugin entry escapes its directory: ${plugin.manifest.entry}`);
+    }
+    const exists = await fsp.stat(normalized).then((s) => s.isFile()).catch(() => false);
+    if (!exists) throw purgeError("not_found", `plugin entry not found: ${normalized}`);
+    const ctx = this.#context(plugin);
+    try {
+      const mod = (await import(pathToFileURL(normalized).href)) as PluginInstance;
+      if (typeof mod.activate === "function") await mod.activate(ctx);
+      return mod;
+    } catch (err) {
+      const e = asPurgeError(err);
+      const state = await this.#state();
+      const record = state.plugins.find((p) => p.name === plugin.manifest.name);
+      if (record) record.state = "broken";
+      await this.#saveState(state);
+      throw purgeError("service_failed", `plugin ${plugin.manifest.name} failed to load: ${e.message}`, { cause: e.toJSON() });
+    }
+  }
+
+  #context(plugin: InstalledPlugin): PluginContext {
+    const granted = new Set(plugin.manifest.capabilities);
+    const dataDir = path.join(plugin.dir, ".data");
+    const storeFile = path.join(dataDir, "store.json");
+    return {
+      name: plugin.manifest.name,
+      version: plugin.manifest.version,
+      dataDir,
+      log: (level, msg, ctx) => this.#o.logger[level](`[plugin:${plugin.manifest.name}] ${msg}`, ctx),
+      use: <T,>(service: string): T => {
+        if (!granted.has(service)) {
+          throw purgeError("policy_denied", `plugin ${plugin.manifest.name} did not declare capability "${service}"`, {
+            declared: [...granted],
+          });
+        }
+        return this.#o.resolveService(service) as T;
+      },
+      store: {
+        get: async <T,>(key: string) => {
+          const data = await readJson<Record<string, unknown>>(storeFile, {});
+          return data[key] as T | undefined;
+        },
+        set: async (key: string, value: unknown) => {
+          await ensureDir(dataDir);
+          const data = await readJson<Record<string, unknown>>(storeFile, {});
+          data[key] = value;
+          await atomicWriteFile(storeFile, `${JSON.stringify(data, null, 2)}\n`);
+        },
+      },
+    };
+  }
+
+  async #readManifest(file: string): Promise<PluginManifest> {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fsp.readFile(file, "utf8"));
+    } catch (err) {
+      throw purgeError("schema_invalid", `cannot read plugin manifest ${file}: ${(err as Error).message}`);
+    }
+    const m = raw as Partial<PluginManifest>;
+    const problems: string[] = [];
+    if (!m.name || !NAME_RE.test(m.name)) problems.push("name must match [a-z0-9._-]");
+    if (!m.version) problems.push("version is required");
+    if (m.apiVersion !== PLUGIN_API_VERSION) problems.push(`apiVersion must be "${PLUGIN_API_VERSION}"`);
+    if (!m.entry || m.entry.includes("..") || path.isAbsolute(m.entry)) problems.push("entry must be a relative path");
+    if (!Array.isArray(m.capabilities)) problems.push("capabilities must be an array");
+    if (problems.length > 0) {
+      throw purgeError("schema_invalid", `invalid plugin manifest: ${problems.join("; ")}`, { file, problems });
+    }
+    return {
+      name: m.name as string,
+      version: m.version as string,
+      apiVersion: m.apiVersion as string,
+      entry: m.entry as string,
+      description: m.description,
+      capabilities: m.capabilities as string[],
+      permissions: m.permissions ?? [],
+    };
+  }
+
+  async #find(name: string): Promise<InstalledPlugin> {
+    const all = await this.list();
+    const found = all.filter((p) => p.manifest.name === name).sort((a, b) => a.manifest.version.localeCompare(b.manifest.version)).at(-1);
+    if (!found) throw purgeError("not_found", `plugin not installed: ${name}`);
+    return found;
+  }
+
+  async #stateOf(name: string, version: string): Promise<PluginState | undefined> {
+    const state = await this.#state();
+    return state.plugins.find((p) => p.name === name && p.version === version)?.state;
+  }
+
+  async #state(): Promise<StateFile> {
+    return readJson<StateFile>(this.stateFile, { plugins: [] });
+  }
+
+  async #saveState(state: StateFile): Promise<void> {
+    await ensureDir(path.dirname(this.stateFile));
+    await atomicWriteFile(this.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
+
+  async #treeHash(dir: string): Promise<string> {
+    const hash = createHash("sha256");
+    const walk = async (current: string, rel: string): Promise<void> => {
+      const entries = await fsp.readdir(current, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (entry.name === ".data") continue;
+        const abs = path.join(current, entry.name);
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+          await walk(abs, relPath);
+        } else if (entry.isFile()) {
+          hash.update(`${relPath}:${await sha256File(abs)}\n`);
+        }
+      }
+    };
+    await walk(dir, "");
+    return hash.digest("hex");
+  }
+}
+
+async function copyDir(src: string, dest: string): Promise<void> {
+  await ensureDir(dest);
+  const entries = await fsp.readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === ".data") continue;
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) {
+      await copyDir(from, to);
+      continue;
+    }
+    if (entry.isFile()) await fsp.copyFile(from, to);
+  }
+}

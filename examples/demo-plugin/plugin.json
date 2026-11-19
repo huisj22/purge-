@@ -1,0 +1,9 @@
+{
+  "name": "purge-example-plugin",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entry": "index.mjs",
+  "description": "示例插件：只读诊断计数",
+  "capabilities": ["diagnostics"],
+  "permissions": ["读取诊断结果"]
+}
