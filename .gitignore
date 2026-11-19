@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建/运行产物
+dist/
+.purge-data/
+*.db
+*.db-wal
+*.db-shm
+
+# 原项目参考资料（体积大且属第三方，不进入版本库）
+_research/orig-zip/
+_research/phase0-raw/
+references/*.zip
+references/original/
+
+# 本地临时
+*.log
+.DS_Store
+Thumbs.db

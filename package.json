@@ -1,0 +1,27 @@
+﻿{
+  "name": "purge-plus",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Purge+ 鈥?host-agnostic agent operations platform: discovery, diagnostics, transactional modification packs, workflow, scheduling, observability, recovery.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "bin": {
+    "purgeplus": "./src/cli/main.ts"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "test:one": "node --test",
+    "typecheck": "tsc --noEmit",
+    "doctor": "node src/cli/main.ts doctor",
+    "serve": "node src/cli/main.ts serve",
+    "cli": "node src/cli/main.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  },
+  "license": "MIT"
+}
+
