@@ -18,7 +18,7 @@
     "ci": "node scripts/ci.mjs",
     "ci:install": "node scripts/ci.mjs install",
     "package": "node scripts/package.mjs",
-    "install": "node scripts/install.mjs",
+    "install:app": "node scripts/install.mjs",
     "preflight": "node scripts/install.mjs --preflight",
     "acceptance": "node scripts/acceptance.ts",
     "doctor": "node src/cli/main.ts doctor",
