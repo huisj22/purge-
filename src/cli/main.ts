@@ -47,7 +47,7 @@ const HELP = `Purge+ ${APP_VERSION}
   host list                       发现宿主
   host inspect <hostId>           只读取证（磁盘态/进程态/加载态）
   diagnose [<hostId>] [--all]     运行诊断
-  snapshot list|capture <label> <abs-path...>|restore <id>|verify <id>   （capture 的路径会被逐文件快照）
+  snapshot list|capture <label> <abs-path...>|verify <id>|plan <id>|restore <id> [--force --by <who> --reason <text>]
   pack list|import <file>|plan <id> <hostId>|apply <id> <hostId>|revert <snapshotId>
   rule list|add <id> <title> --body <text>|show <id>|on|off|rm <id>|compose [--workspace <dir>]
   skill list|scan <root>|add <dir> [--overwrite]|rm <name>
@@ -56,6 +56,7 @@ const HELP = `Purge+ ${APP_VERSION}
   workflow list|run <id>|runs
   job list|add <id> <workflowId> <cron|间隔秒>|pause <id>|resume <id>|rm <id>
   audit [--limit N]               审计（含链校验）
+  locks                           查看跨进程维护锁状态
   config get|set <key=value...>
   cfg read|diff <path> [--file <src>|--content <text>]|commit <path> --file <src> [--expect hash] [--yes]|history [path]
   policy check <action> [paths...] 风险评分预览
@@ -170,7 +171,7 @@ async function main(argv: string[]): Promise<number> {
 
       case "snapshot": {
         if (sub === "list") {
-          const list = s.snapshots.list(50).map(({ manifest, ...r }) => r);
+          const list = s.snapshots.list(50).map(({ manifest: _manifest, ...r }) => r);
           out(list, list.map((r) => `${r.snapId}\t${r.label}\t${r.stats.files} 文件/${r.stats.bytes} 字节`).join("\n") || "无快照");
           return EXIT.ok;
         }
@@ -191,13 +192,36 @@ async function main(argv: string[]): Promise<number> {
           out(v, v.ok ? "快照完整" : `快照损坏：${v.issues.join("; ")}`);
           return v.ok ? EXIT.ok : EXIT.failed;
         }
+        if (sub === "plan" && rest[0]) {
+          const plan = await s.snapshots.planRestore(rest[0]);
+          out(
+            plan,
+            [
+              `快照 ${plan.snapId} · ${plan.label}`,
+              `UNCHANGED ${plan.counts.UNCHANGED} · MODIFIED ${plan.counts.MODIFIED} · NEWER ${plan.counts.NEWER} · DELETED ${plan.counts.DELETED} · UNKNOWN ${plan.counts.UNKNOWN} · CORRUPTED ${plan.counts.CORRUPTED}`,
+              `结论：${plan.blocked ? `BLOCKED（${plan.conflicts} 项冲突）` : "可安全恢复"}`,
+              ...plan.entries.filter((e) => e.status !== "UNCHANGED").map((e) => `  [${e.status}] ${e.path}${e.reason ? ` — ${e.reason}` : ""}`),
+            ].join("\n"),
+          );
+          return plan.blocked ? EXIT.failed : EXIT.ok;
+        }
         if (sub === "restore" && rest[0]) {
           const id = rest[0];
           const snap = s.snapshots.get(id);
+          const force = rest.includes("--force");
+          const byFlag = rest.indexOf("--by");
+          const reasonFlag = rest.indexOf("--reason");
+          const authorizedBy = byFlag >= 0 ? (rest[byFlag + 1] as string) : "";
+          const reason = reasonFlag >= 0 ? (rest[reasonFlag + 1] as string) : "";
           const { result } = await app.guarded(
             "cli",
             { action: "snapshot.restore", target: id, paths: snap.manifest.entries.map((e) => e.path), origin: "human" },
-            () => s.snapshots.restore(id),
+            () =>
+              s.snapshots.restore(id, {
+                policy: force ? "force" : "block",
+                ...(authorizedBy ? { authorizedBy } : {}),
+                ...(reason ? { reason } : {}),
+              }),
             { confirmed: flags.yes, forceConfirm: true },
           );
           out(result, `恢复 ${result.restored.length} 个文件，删除 ${result.removed.length} 个，失败 ${result.failed.length} 个`);
@@ -562,6 +586,16 @@ async function main(argv: string[]): Promise<number> {
           return EXIT.ok;
         }
         break;
+      }
+
+      case "locks": {
+        const { listLocks } = await import("../core/lock.ts");
+        const locks = await listLocks(app.dataDir);
+        out(
+          locks,
+          locks.length ? locks.map((l) => `${l.resource}\t${l.state}\t${l.owner ? `pid=${l.owner.pid} op=${l.owner.operation}` : ""}${l.detail ? `\t${l.detail}` : ""}`).join("\n") : "无活跃锁",
+        );
+        return EXIT.ok;
       }
 
       case "audit": {

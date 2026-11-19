@@ -166,9 +166,29 @@ async function main(): Promise<void> {
     const snap = await api<{ snapId: string }>(base, "POST", "/api/snapshots", { label: "acceptance", paths: [host.markerFile], confirm: true });
     await writeFile(host.markerFile, "tampered\n", "utf8");
     const verify = await api<{ ok: boolean }>(base, "GET", `/api/snapshots/${snap.json.data?.snapId}/verify`);
-    const restore = await api<{ failed: unknown[] }>(base, "POST", `/api/snapshots/${snap.json.data?.snapId}/restore`, { confirm: true });
+    // 冲突检测（P2-08）：文件已被改动 → 默认阻止
+    const snapPlan = await api<{ blocked: boolean; conflicts: number }>(base, "GET", `/api/snapshots/${snap.json.data?.snapId}/plan`);
+    const blockedRestore = await api(base, "POST", `/api/snapshots/${snap.json.data?.snapId}/restore`, { confirm: true });
+    // 显式 force + 授权人 → 允许覆盖，并留下保护快照
+    const forced = await api<{ failed: unknown[]; force?: { authorizedBy: string }; preSnapshotId?: string }>(
+      base,
+      "POST",
+      `/api/snapshots/${snap.json.data?.snapId}/restore`,
+      { confirm: true, force: true, authorizedBy: "acceptance-bot", reason: "e2e check" },
+    );
     const restored = await readFile(host.markerFile, "utf8");
-    record("7 snapshot restore", verify.json.data?.ok === true && restore.json.ok === true && restored === original, "快照校验 + 恢复成功");
+    record(
+      "7 snapshot restore",
+      verify.json.data?.ok === true &&
+        snapPlan.json.data?.blocked === true &&
+        blockedRestore.status === 409 &&
+        forced.json.ok === true &&
+        forced.json.data?.failed.length === 0 &&
+        forced.json.data?.force?.authorizedBy === "acceptance-bot" &&
+        Boolean(forced.json.data?.preSnapshotId) &&
+        restored === original,
+      `plan=blocked(${snapPlan.json.data?.conflicts}) · 未授权=409 · force 恢复成功 · 保护快照=${forced.json.data?.preSnapshotId}`,
+    );
 
     // 8 update
     const artifact = path.join(root, "payload.bin");

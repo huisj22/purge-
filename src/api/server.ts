@@ -272,7 +272,7 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
     }
 
     if (resource === "snapshots") {
-      if (method === "GET" && !id) return s.snapshots.list(50).map(({ manifest, ...rest }) => rest);
+      if (method === "GET" && !id) return s.snapshots.list(50).map(({ manifest: _manifest, ...rest }) => rest);
       if (method === "POST" && !id) {
         const body = await readJson(req, maxBody);
         const paths = Array.isArray(body.paths) ? body.paths.filter((p): p is string => typeof p === "string") : [];
@@ -289,14 +289,22 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
         return rest;
       }
       if (method === "GET" && id && action === "verify") return s.snapshots.verify(id);
+      if (method === "GET" && id && action === "plan") return s.snapshots.planRestore(id);
       if (method === "POST" && id && action === "restore") {
         const body = await readJson(req, maxBody);
         const rec = s.snapshots.get(id);
         const paths = rec.manifest.entries.map((e) => e.path);
+        const policy = body.force === true ? "force" : "block";
+        const authorizedBy = typeof body.authorizedBy === "string" ? body.authorizedBy : "";
         const { result } = await app.guarded(
           "api",
           { action: "snapshot.restore", target: id, paths, origin: "human" },
-          () => s.snapshots.restore(id),
+          () =>
+            s.snapshots.restore(id, {
+              policy,
+              ...(authorizedBy ? { authorizedBy } : {}),
+              ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
+            }),
           { confirmed: body.confirm === true, forceConfirm: true },
         );
         return result;
@@ -606,6 +614,11 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
           }),
         };
       }
+    }
+
+    if (resource === "locks" && method === "GET") {
+      const { listLocks } = await import("../core/lock.ts");
+      return listLocks(app.dataDir);
     }
 
     if (resource === "traces") {
