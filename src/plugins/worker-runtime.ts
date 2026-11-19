@@ -52,6 +52,18 @@ function send(message: Record<string, unknown>): void {
   process.send?.(message);
 }
 
+function callHost(op: string, args: unknown[]): Promise<unknown> {
+  const id = `cap-${nextRequest++}`;
+  const reply = new Promise<unknown>((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    setTimeout(() => {
+      if (pending.delete(id)) reject(new Error(`host call ${op} timed out`));
+    }, 10_000);
+  });
+  send({ v: SCHEMA_VERSION, type: "capability", id, service: "__data__", method: op, args });
+  return reply;
+}
+
 function makeContext(): Record<string, unknown> {
   return {
     name: pluginName,
@@ -80,13 +92,23 @@ function makeContext(): Record<string, unknown> {
         },
       );
     },
+    // 数据访问必须经宿主（T055-03）：worker 自己不做路径判断，宿主拒绝即失败。
+    data: {
+      read: async (rel: string) => {
+        const raw = await callHost("data.read", [rel]);
+        // IPC 会把 Buffer 序列化成 {type:"Buffer",data:[...]}，这里还原
+        if (Buffer.isBuffer(raw)) return raw;
+        const obj = raw as { type?: string; data?: number[] } | null;
+        if (obj && obj.type === "Buffer" && Array.isArray(obj.data)) return Buffer.from(obj.data);
+        return Buffer.from(typeof raw === "string" ? raw : JSON.stringify(raw ?? ""), "utf8");
+      },
+      write: (rel: string, data: unknown) => callHost("data.write", [rel, data]),
+      list: (rel?: string) => callHost("data.list", [rel ?? "."]),
+      remove: (rel: string) => callHost("data.remove", [rel]),
+    },
     store: {
-      get: async () => {
-        throw new Error("worker plugins cannot use the host store; use dataDir");
-      },
-      set: async () => {
-        throw new Error("worker plugins cannot use the host store; use dataDir");
-      },
+      get: (key: string) => callHost("data.get", [key]),
+      set: (key: string, value: unknown) => callHost("data.set", [key, value]),
     },
   };
 }

@@ -141,6 +141,7 @@ export class PurgeApp {
       dataDir,
       logger: this.logger,
       isolation: cfg.plugins.isolation === "process" ? "process" : "in-process",
+      onAudit: (event) => audit.append({ actor: "plugin-host", action: event.action, ...(event.target ? { target: event.target } : {}), risk: event.risk ?? 0, ...(event.detail === undefined ? {} : { detail: event.detail }) }),
       resolveService: (capability) => resolveCapability(servicesRef.value, capability),
     });
     const updates = new UpdateService({

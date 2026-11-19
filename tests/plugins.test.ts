@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -165,8 +165,11 @@ describe("plugin host", () => {
     });
     await host.install(src);
     await host.enable("store-plugin");
-    const dir = (await host.list())[0]?.dir as string;
-    const stored = JSON.parse(await (await import("node:fs/promises")).readFile(path.join(dir, ".data", "store.json"), "utf8"));
+    // T055-03：插件数据与程序目录分离
+    const dataDir = path.join(host.dataRoot, "store-plugin");
+    const stored = JSON.parse(await readFile(path.join(dataDir, "store.json"), "utf8"));
     assert.equal(stored.count, 7);
+    const programDir = (await host.list())[0]?.dir as string;
+    await assert.rejects(() => readFile(path.join(programDir, ".data", "store.json"), "utf8"));
   });
 });

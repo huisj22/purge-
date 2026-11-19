@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { atomicWriteFile, ensureDir, readJson, removeTreeNoFollow, sha256File } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
 import { withWriteGuard } from "../core/lock.ts";
+import { PluginDataStore } from "./data-policy.ts";
 import type { Logger } from "../core/logger.ts";
 
 export const PLUGIN_API_VERSION = "1";
@@ -51,6 +52,16 @@ export interface PluginContext {
     get<T>(key: string): Promise<T | undefined>;
     set(key: string, value: unknown): Promise<void>;
   };
+  /**
+   * 宿主调解的数据访问（T055-03）：所有路径由宿主校验，限制在本插件数据目录内。
+   * 这不是 OS 沙箱：插件仍可直接使用 node:fs 访问其它路径。
+   */
+  data: {
+    read(rel: string): Promise<Buffer>;
+    write(rel: string, data: Buffer | string): Promise<{ path: string; hash: string; size: number }>;
+    list(rel?: string): Promise<Array<{ name: string; dir: boolean; size: number }>>;
+    remove(rel: string): Promise<{ removed: boolean }>;
+  };
 }
 
 export interface PluginInstance {
@@ -75,6 +86,8 @@ export interface PluginHostOptions {
   dataDir: string;
   /** in-process（默认）或 process（独立子进程，T-036）。 */
   isolation?: "in-process" | "process";
+  /** 数据访问被拒绝时的审计回调（T055-03）。 */
+  onAudit?: (event: { action: string; target?: string; risk?: number; detail?: unknown }) => void;
   logger: Logger;
   /** 服务解析器：能力名 → 服务实例。由组合根注入（通常是 kernel.get）。 */
   resolveService: (name: string) => unknown;
@@ -89,7 +102,10 @@ const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export class PluginHost {
   readonly dir: string;
   readonly dataDir: string;
+  /** 插件私有数据根目录（与程序目录分离）。 */
+  readonly dataRoot: string;
   readonly stateFile: string;
+  #dataStore: PluginDataStore;
   readonly #o: PluginHostOptions;
   readonly #instances = new Map<string, PluginInstance>();
   readonly #workers = new Map<string, import("./isolated-host.ts").IsolatedPluginWorker>();
@@ -98,6 +114,8 @@ export class PluginHost {
     this.#o = opts;
     this.dataDir = opts.dataDir;
     this.dir = path.join(opts.dataDir, "plugins");
+    this.dataRoot = path.join(opts.dataDir, "plugin-data");
+    this.#dataStore = new PluginDataStore(this.dataRoot);
     this.stateFile = path.join(opts.dataDir, "plugin-state.json");
   }
 
@@ -186,8 +204,40 @@ export class PluginHost {
       const worker = new IsolatedPluginWorker({
         manifest: plugin.manifest,
         pluginDir: plugin.dir,
+        dataDir: this.#dataStore.dirFor(plugin.manifest.name),
         logger: this.#o.logger,
         capabilityResolver: (service, capabilityMethod) => {
+          // 数据通道：走宿主的数据边界校验（T055-03），不经过能力白名单
+          if (service === "__data__") {
+            const api = this.#deniedAuditedApi(plugin.manifest.name);
+            return {
+              allow: true,
+              invoke: (...args: unknown[]) => {
+                const [rel, payload] = args as [string, unknown];
+                switch (capabilityMethod) {
+                  case "data.read":
+                    return api.read(rel);
+                  case "data.write": {
+                    const buf =
+                      payload && typeof payload === "object" && (payload as { type?: string }).type === "Buffer"
+                        ? Buffer.from((payload as { data: number[] }).data)
+                        : Buffer.from(String(payload ?? ""), "utf8");
+                    return api.write(rel, buf);
+                  }
+                  case "data.list":
+                    return api.list(rel);
+                  case "data.remove":
+                    return api.remove(rel);
+                  case "data.get":
+                    return api.get(rel);
+                  case "data.set":
+                    return api.set(rel, payload).then(() => ({ ok: true }));
+                  default:
+                    throw new Error(`unknown data operation: ${capabilityMethod}`);
+                }
+              },
+            };
+          }
           if (!plugin.manifest.capabilities.includes(service)) return { allow: false, reason: `capability ${service} not declared` };
           const svc = this.#o.resolveService(service) as Record<string, unknown> | undefined;
           return {
@@ -317,18 +367,34 @@ export class PluginHost {
     return withPluginTimeout(Promise.resolve(instance.invoke(method, args)), opts.timeoutMs ?? 5000, `invoke ${name}.${method}`);
   }
 
-  async remove(name: string): Promise<{ removed: string }> {
-    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.remove" }, () => this.#removeLocked(name));
+  /**
+   * 卸载插件。
+   * 默认**保留**插件私有数据（用户数据不因卸载而消失）；只有 purgeData=true 才删除。
+   */
+  async remove(name: string, opts: { purgeData?: boolean } = {}): Promise<{ removed: string; dataPurged: boolean; dataKept: boolean }> {
+    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.remove", waitMs: 5000 }, () =>
+      this.#removeLocked(name, opts),
+    );
   }
 
-  async #removeLocked(name: string): Promise<{ removed: string }> {
+  async #removeLocked(name: string, opts: { purgeData?: boolean } = {}): Promise<{ removed: string; dataPurged: boolean; dataKept: boolean }> {
     const plugin = await this.#find(name);
     if (plugin.state === "enabled") await this.disable(name);
+    // 只删程序文件；私有数据在 plugin-data/<id>/，与版本目录分离
     await removeTreeNoFollow(plugin.dir);
+    let dataPurged = false;
+    let dataKept = false;
+    if (opts.purgeData === true) {
+      const dropped = await this.#dataStore.drop(name);
+      dataPurged = dropped.removed;
+      this.#o.onAudit?.({ action: "plugin.data.purged", target: name, risk: 60, detail: { removed: dropped.removed } });
+    } else {
+      dataKept = await this.#dataStore.exists(name);
+    }
     const state = await this.#state();
     state.plugins = state.plugins.filter((p) => p.name !== name);
     await this.#saveState(state);
-    return { removed: plugin.dir };
+    return { removed: plugin.dir, dataPurged, dataKept };
   }
 
   async #load(plugin: InstalledPlugin): Promise<PluginInstance> {
@@ -339,6 +405,9 @@ export class PluginHost {
     }
     const exists = await fsp.stat(normalized).then((s) => s.isFile()).catch(() => false);
     if (!exists) throw purgeError("not_found", `plugin entry not found: ${normalized}`);
+    // 数据目录独立于程序目录；首次加载时把旧版 `<program>/.data` 迁移过来
+    await this.#dataStore.ensure(plugin.manifest.name);
+    await this.#dataStore.migrateLegacy(plugin.manifest.name, path.join(plugin.dir, ".data"));
     const ctx = this.#context(plugin);
     try {
       const mod = (await import(pathToFileURL(normalized).href)) as PluginInstance;
@@ -356,12 +425,19 @@ export class PluginHost {
 
   #context(plugin: InstalledPlugin): PluginContext {
     const granted = new Set(plugin.manifest.capabilities);
-    const dataDir = path.join(plugin.dir, ".data");
-    const storeFile = path.join(dataDir, "store.json");
+    // 数据目录与程序目录分离：升级/重装不会丢数据，卸载默认保留数据
+    const dataDir = this.#dataStore.dirFor(plugin.manifest.name);
+    const api = this.#deniedAuditedApi(plugin.manifest.name);
     return {
       name: plugin.manifest.name,
       version: plugin.manifest.version,
       dataDir,
+      data: {
+        read: api.read,
+        write: api.write,
+        list: api.list,
+        remove: api.remove,
+      },
       log: (level, msg, ctx) => this.#o.logger[level](`[plugin:${plugin.manifest.name}] ${msg}`, ctx),
       use: <T,>(service: string): T => {
         if (!granted.has(service)) {
@@ -372,20 +448,42 @@ export class PluginHost {
         return this.#o.resolveService(service) as T;
       },
       store: {
-        get: async <T,>(key: string) => {
-          const data = await readJson<Record<string, unknown>>(storeFile, {});
-          return data[key] as T | undefined;
-        },
-        set: async (key: string, value: unknown) => {
-          await ensureDir(dataDir);
-          const data = await readJson<Record<string, unknown>>(storeFile, {});
-          data[key] = value;
-          await atomicWriteFile(storeFile, `${JSON.stringify(data, null, 2)}\n`);
-        },
+        get: <T,>(key: string) => api.get<T>(key),
+        set: (key: string, value: unknown) => api.set(key, value),
       },
     };
   }
 
+  /** 数据访问被拒绝时写入审计（T055-03）：拒绝必须可追溯。 */
+  #deniedAuditedApi(name: string): ReturnType<PluginDataStore["api"]> {
+    const api = this.#dataStore.api(name);
+    const audit = this.#o.onAudit;
+    const wrap = <A extends unknown[], R>(op: string, fn: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => {
+      try {
+        return await fn(...args);
+      } catch (err) {
+        const e = asPurgeError(err);
+        if (e.code === "policy_denied" || e.code === "invalid_argument") {
+          audit?.({ action: "plugin.data.denied", target: name, risk: 40, detail: { op, args: args.slice(0, 1), code: e.code, message: e.message } });
+          throw purgeError("policy_denied", `plugin ${name} data access denied: ${e.message}`, {
+            ...(e.detail !== undefined ? { detail: e.detail } : {}),
+            plugin: name,
+            operation: op,
+          });
+        }
+        throw err;
+      }
+    };
+    return {
+      read: wrap("read", api.read),
+      write: wrap("write", api.write),
+      list: wrap("list", api.list),
+      remove: wrap("remove", api.remove),
+      get: wrap("get", api.get),
+      set: wrap("set", api.set),
+      keys: wrap("keys", api.keys),
+    } as ReturnType<PluginDataStore["api"]>;
+  }
   async #readManifest(file: string): Promise<PluginManifest> {
     let raw: unknown;
     try {

@@ -27,6 +27,8 @@ export interface WorkerOptions {
   logger: Logger;
   /** 能力审批器：返回 { allow, handler }。Host 决定是否放行。 */
   capabilityResolver: (service: string, method: string) => { allow: boolean; invoke?: (...args: unknown[]) => unknown; reason?: string };
+  /** 插件私有数据目录（由 Host 分配，worker 只能通过 ctx.data 访问）。 */
+  dataDir?: string;
   startupTimeoutMs?: number;
   requestTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -81,6 +83,7 @@ export class IsolatedPluginWorker {
         PURGE_PLUGIN_NAME: this.manifest.name,
         PURGE_PLUGIN_ENTRY: this.manifest.entry,
         PURGE_PLUGIN_CAPABILITIES: JSON.stringify(this.manifest.capabilities),
+        PURGE_PLUGIN_DATA: this.#o.dataDir ?? "",
       },
     });
     this.#child = child;
@@ -160,8 +163,9 @@ export class IsolatedPluginWorker {
     const service = String(msg.service ?? "");
     const method = String(msg.method ?? "");
     const reply = (payload: Record<string, unknown>) => this.#send({ v: IPC_SCHEMA_VERSION, type: "capability_result", id, ...payload });
-    // 白名单不在清单里 → 直接拒绝（Host 决定，Worker 无权自批）
-    if (!this.manifest.capabilities.includes(service)) {
+    // 宿主调解的通道（如 __data__）不走插件能力声明，但仍由 Host 侧做边界校验
+    const hostMediated = service === "__data__";
+    if (!hostMediated && !this.manifest.capabilities.includes(service)) {
       reply({ error: `capability "${service}" not declared` });
       return;
     }
