@@ -177,7 +177,7 @@ describe("diagnostics", () => {
     const report = await svc.run(candidate?.id as string);
     const rule = report.findings.find((f) => f.ruleId === "profile.bundle_declared");
     assert.equal(rule?.status, "fail");
-    assert.match(rule?.rootCause?.text ?? "", /缺少依赖/);
+    assert.match(rule?.rootCause?.text ?? "", /缺少第三方插件依赖/);
     ctx.db.close();
   });
 });

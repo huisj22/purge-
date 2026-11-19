@@ -15,12 +15,12 @@
 | M5 诊断 | 规则化 Inspect → Findings → 报告落库 | 假宿主的 broken/warn/unknown 三态可控 | ✅ |
 | M6 编排 | Workflow（DAG/并行/重试/超时/取消/恢复） | 9 类行为测试全绿 | ✅ |
 | M7 调度 | interval + cron-lite + 并发互斥 + 持久化 | 不重叠/暂停恢复/失败留痕测试全绿 | ✅ |
-| M8 策略 | 风险评分 + allow/confirm/deny + 审计接入 | 阈值与 AI 来源不可降级测试 | ⏳ |
-| M9 API | REST + 统一错误 + 策略接入 + 静态 UI 托管 | curl 全端点返回真实数据 | ⏳ |
-| M10 CLI | doctor/host/diagnose/serve/backup/audit/workflow/job | 端到端在本机跑通 | ⏳ |
-| M11 UI | 概览/宿主/诊断/快照/工作流/调度/审计 | 浏览器可操作，数据来自 API | ⏳ |
-| M12 修改包 | pack schema + plan/apply/revert + 风险分级 | 对假宿主完成 apply→verify→revert | ⏳ |
-| M13 交付 | README/安装/状态文档/提交 | 新机器按 README 可跑 | ⏳ |
+| M8 策略 | 风险评分 + allow/confirm/deny + 审计接入 | 阈值与 AI 来源不可降级测试 | ✅ |
+| M9 API | REST + 统一错误 + 策略接入 + 静态 UI 托管 | 全端点返回真实数据 | ✅ |
+| M10 CLI | doctor/host/diagnose/pack/snapshot/workflow/job/audit/serve | 端到端在本机跑通 | ✅ |
+| M11 UI | 概览/宿主/诊断/快照/修改包/编排/调度/审计（8 屏） | 浏览器可操作，数据来自 API | ✅ |
+| M12 修改包 | pack schema + plan/apply/revert + 风险分级 | 对假宿主完成 apply→verify→revert | ✅ |
+| M13 交付 | README/安装/状态文档/提交 | 新机器按 README 可跑 | ✅（类型检查待补） |
 
 ## v0.2 — 配置中心与规则技能中心
 

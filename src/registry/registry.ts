@@ -93,6 +93,7 @@ export class HostRegistry {
   }
 
   async inspect(id: string, force = false): Promise<HostFacts> {
+    if (this.#candidates.length === 0) await this.discover();
     const cached = this.#facts.get(id);
     if (!force && cached && Date.now() - cached.at < this.#ttl) return cached.facts;
     const candidate = this.get(id);

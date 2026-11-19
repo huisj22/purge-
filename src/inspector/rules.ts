@@ -182,9 +182,15 @@ export const RULES: Rule[] = [
       }
       const missing: string[] = [];
       const dupes: string[] = [];
+      const official: string[] = [];
       for (const p of facts.profiles) {
         if (p.error) continue;
         for (const bundle of p.bundles) {
+          // 官方 bundle（@deepseek-ai/*）由宿主自带运行时解析，本就不在 profile 依赖里。
+          if (bundle.startsWith("@deepseek-ai/")) {
+            official.push(`${p.name}:${bundle}`);
+            continue;
+          }
           const bare = bundle.split("/").slice(0, bundle.startsWith("@") ? 2 : 1).join("/");
           if (!(bundle in p.dependencies) && !(bare in p.dependencies)) missing.push(`${p.name}:${bundle}`);
         }
@@ -194,7 +200,22 @@ export const RULES: Rule[] = [
           seen.add(b);
         }
       }
-      const problems = [...missing.map((m) => `缺少依赖 ${m}`), ...dupes.map((d) => `重复启用 ${d}`)];
+      const problems = [...missing.map((m) => `缺少第三方插件依赖 ${m}`), ...dupes.map((d) => `重复启用 ${d}`)];
+      if (problems.length === 0 && official.length > 0) {
+        return {
+          id: "profile.bundle_declared",
+          ruleId: "profile.bundle_declared",
+          title: "profile 启用项都有依赖声明",
+          severity: "low",
+          status: "pass",
+          rootCause: {
+            confidence: "verified",
+            text: `第三方启用项均有依赖声明；${official.length} 个官方 bundle 由宿主运行时解析`,
+          },
+          evidence: facts.profiles.map((p) => ev("file", p.packageJsonPath)),
+          tags: ["official-bundles"],
+        };
+      }
       return {
         id: "profile.bundle_declared",
         ruleId: "profile.bundle_declared",

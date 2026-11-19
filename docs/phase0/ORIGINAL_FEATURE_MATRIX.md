@@ -6,6 +6,8 @@
 状态词表：`done` 已实现且有测试 · `wip` 实现中 · `planned` 未开始 · `n/a` 不适用
 
 统计：登记 **74** 项；KEEP 6 · IMPROVE 21 · REFACTOR 24 · REPLACE 10 · DEFER 9 · REMOVE 4
+进度：`done` 31 项（均有测试或实机验证）· `wip` 3 项 · `planned` 31 项 · `n/a`（DEFER/REMOVE）9 项
+最后核对：2026-11-19（与 `node --test` 106 项全绿同日）
 
 ---
 
@@ -13,19 +15,19 @@
 
 | # | 原功能 | 实现位置 | 工作机制 | 原限制 | Purge+ 模块 | 策略 | 实现 | 测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A1 | 声明式补丁表（86 条） | `patches/index.mjs:8` | `{id,name,layer,file,replacements,markers}` 常量数组 | 代码内常量，宿主路径硬编码 | `inspector/packs`（外部 pack 文件） | REFACTOR | wip | — |
+| A1 | 声明式补丁表（86 条） | `patches/index.mjs:8` | `{id,name,layer,file,replacements,markers}` 常量数组 | 代码内常量，宿主路径硬编码 | `src/packs/schema.ts`（外部 pack 文件） | REFACTOR | done | `tests/packs.test.ts` |
 | A2 | 目标文件解析 `targetFiles()` | `core.js:2805-3066` | 72 个逻辑键 → 双布局（单包/monorepo）路径 | 路径写死，新增宿主需改代码 | Adapter `inspect()` 返回布局事实 | REPLACE | done（DSH 适配器） | `tests/adapters.test.ts` |
-| A3 | 字面量替换 + 正则 `$1..$9` | `core/verify.mjs:7-87` | split/join 字面量；正则捕获组 | 无命中数约束（默认） | `packs/matcher.ts` | IMPROVE（默认 expect=1） | planned | — |
-| A4 | `expect` 命中数契约 | `core.js:3457-3462` | 实际命中≠expect → 整条拒写 | 全表仅 1 条使用 | 同上，**默认启用** | IMPROVE | planned | — |
-| A5 | markers 判「已应用」 | `core.js:3767-3812` | 文件含 marker 即 applied | marker 可被宿主复制误判 | `packs/matcher.ts` | KEEP | planned | — |
+| A3 | 字面量替换 + 正则 | `core/verify.mjs:7-87` | split/join 字面量；正则捕获组 | 无命中数约束（默认） | `src/packs/matcher.ts` | IMPROVE（默认 expect=1） | done | `tests/packs.test.ts` |
+| A4 | `expect` 命中数契约 | `core.js:3457-3462` | 实际命中≠expect → 整条拒写 | 全表仅 1 条使用 | 同上，**默认启用** | IMPROVE | done | `tests/packs.test.ts` |
+| A5 | markers 判「已应用」 | `core.js:3767-3812` | 文件含 marker 即 applied | marker 可被宿主复制误判 | `src/packs/matcher.ts` | KEEP | done | `tests/packs.test.ts` |
 | A6 | 11 态补丁状态机 | `core.js:3718-3812` | applied/pending/drifted/unmatched/skipped/unreadable/missing/partial/disabled/na/unknown | 聚合口径两套 | `inspector/types.ts` 词表 + 单一聚合 | IMPROVE | done（诊断侧） | `tests/diagnostics.test.ts` |
 | A7 | 逐文件状态明细 | `core.js:3714-3716` | `patch_files[key]=[{path,status}]` | 仅面板消费 | 诊断报告 evidence[] | KEEP | done | `tests/diagnostics.test.ts` |
 | A8 | 漂移诊断（行号+候选落点） | `core.js:3624-3687,3566-3621` | token 打分定位新锚点 | 仅 CLI 输出 | Inspector `drift` 规则 | IMPROVE | planned | — |
-| A9 | 半自动重锚 `reanchor` | `bin/community.js:37-116` | dry-run 唯一性断言 → 写 `anchor-overrides.json` | 只换 pattern 不改 replace | `packs/anchors.ts` | KEEP | planned | — |
+| A9 | 半自动重锚 `reanchor` | `bin/community.js:37-116` | dry-run 唯一性断言 → 写覆盖文件 | 只换 pattern 不改 replace | `src/packs/anchors.ts` | KEEP | planned | — |
 | A10 | 应用事务（备份→写→校验→回滚） | `core.js:3384-3528` | 快照失败只 warn；写失败不回滚 | **非真事务** | `recovery/transaction.ts` | REFACTOR（真事务） | done | `tests/recovery.test.ts` |
 | A11 | 原子写 + 权限保留 | `atomic-files.js:39-52` | 临时文件+rename+chmod 补偿 | 无 fsync 目录 | `core/atomic.ts` | IMPROVE（+fsync） | done | `tests/config.test.ts` |
 | A12 | `.bak` 逐文件备份与自愈 | `core.js:2597-2644,3397-3398` | 缺原文件时从 `.bak` 还原 | 可能用旧 bak 覆盖新版 | `recovery/snapshot.ts`（CAS 快照） | REPLACE | done | `tests/recovery.test.ts` |
-| A13 | 撤销（revert）到未修改 | `core.js` revert 流程 | 反向替换 + 恢复 `.bak` | 无事务 | `packs` revert | REFACTOR | planned | — |
+| A13 | 撤销（revert）到未修改 | `core.js` revert 流程 | 反向替换 + 恢复 `.bak` | 无事务 | 快照恢复（不做反向替换） | REFACTOR | done | `tests/packs.test.ts` |
 | A14 | 解包/回封 ASAR | `extract-asar.js:466-480` | 先全量校验再落盘 + prev 原子提交 | Windows 助手失效 | **不实现换包** | DEFER | — | — |
 
 ## B. 运行时（index.js 等）
@@ -35,9 +37,9 @@
 | B1 | 提示词 section 注入（7 段） | `index.js:394-481` | `host.systemPrompt.section()` + order 预算 | 依赖宿主 order 语义 | — | DEFER（宿主内能力，非平台能力） | — | — |
 | B2 | head/tail/both 注入位置 | `tuning.js` + `index.js:83-107` | 每轮读 tuning | 只影响注入正文 | — | DEFER | — | — |
 | B3 | `excludePresets` 按预设排除 | `preset-injection.js:5-62` | Symbol 溯源，只清自己写的段 | 无预设信息时暂停注入 | — | DEFER | — | — |
-| B4 | 3 个工具（status/apply/revert） | `index.js:1740-1830` | 工具内调 core | 工具即写盘入口 | `api` + `cli`（人可审计） | REPLACE | planned | — |
-| B5 | 4+4 slash 命令（含冲突兜底） | `index.js:1831-1929`、`command-registration.js` | 原名→备用名→跳过并报警 | 占用宿主命令空间 | `cli` 子命令（无冲突问题） | REPLACE | planned | — |
-| B6 | 19+3 HTTP 路由 | `index.js:1929-2619` | 无 token，仅同源比对 | 本机任意页可写 | `api/server.ts` + 策略层 | REFACTOR | planned | — |
+| B4 | 3 个工具（status/apply/revert） | `index.js:1740-1830` | 工具内调 core | 工具即写盘入口 | `api` + `cli`（人可审计） | REPLACE | done | `tests/api.test.ts` |
+| B5 | 4+4 slash 命令（含冲突兜底） | `index.js:1831-1929`、`command-registration.js` | 原名→备用名→跳过并报警 | 占用宿主命令空间 | `src/cli/main.ts`（无命名冲突） | REPLACE | done | 实机 CLI 跑通 |
+| B6 | 19+3 HTTP 路由 | `index.js:1929-2619` | 无 token，仅同源比对 | 本机任意页可写 | `src/api/server.ts` + 策略层 | REFACTOR | done | `tests/api.test.ts` |
 | B7 | 拒绝检测 + 单次重试 | `refusal-retry.js` | `llm/stream` 包一层，缓冲 400 字符，17 正则 | 副作用：可能重复计费 | — | REMOVE（属模型层干预，不属平台职责；理由见安全评审 §3） | — | — |
 | B8 | 持续重试（continue-retry） | `continue-retry.js` | 错误码白名单 + 预算 | 同上 | workflow 的 retry 语义 | REFACTOR（只用于平台任务） | done | `tests/workflow.test.ts` |
 | B9 | steering 恢复 / hooks deny 绕过 | `steering.js`、`hooks-deny.js` | 反向补丁恢复宿主原生行为 | 与宿主逐字耦合 | — | DEFER | — | — |
@@ -54,7 +56,7 @@
 | C4 | 磁盘态/进程态/加载态三分离 | `host-layout.js:116-128` | 9 种 state + 不可推断声明 | surface/family 词表分裂 | `HostFacts.{shape,process,loadedShape}` | KEEP | done | `tests/adapters.test.ts` |
 | C5 | 进程入口证据 `matches_target` | `instance.js:164-184` | 只认 `--app-path`/argv[1]/getAppPath | 依赖 Electron | `process.probe` 规则 | IMPROVE | done | `tests/diagnostics.test.ts` |
 | C6 | 路径边界与 junction 安全 | `path-boundary.js`、`remove-tree.js:8-66` | lstat 优先、不跟随链接、无递归 rm 回退 | — | `core/atomic.ts:removeTreeNoFollow` | KEEP | done | — |
-| C7 | 宿主版本兼容矩阵 | `community.js:115-199` | `QUALIFIED_HOST_VERSIONS` + family | 版本不参与补丁分支 | `inspector` 规则 + pack `target.versions` | REFACTOR | wip | — |
+| C7 | 宿主版本兼容矩阵 | `community.js:115-199` | `QUALIFIED_HOST_VERSIONS` + family | 版本不参与补丁分支 | pack `target.versions` + `packSupportsVersion` | REFACTOR | wip | `tests/packs.test.ts`（单测已覆盖） |
 | C8 | 第三宿主族识别（NEXT） | `next-host.js:57-71`、`desktop.js` | 包名/入口特征 | 部分为死代码 | Adapter 插拔 | IMPROVE | planned | — |
 
 ## D. 更新与安装
@@ -112,13 +114,13 @@
 
 | # | 原功能 | 实现位置 | 工作机制 | 原限制 | Purge+ 模块 | 策略 | 实现 | 测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| H1 | 5 槽位注入面板 | `client.js:15039-15084` | 宿主 slot 契约 | 与宿主 UI 强耦合 | 独立 SPA（同源托管） | REPLACE | planned | — |
-| H2 | 6 页签信息架构 | `client.js:13328-13335` | 状态/提示词/规则/技能/演练台/更多 | — | `ui` 屏幕集合 | KEEP（IA 照抄） | planned | — |
+| H1 | 5 槽位注入面板 | `client.js:15039-15084` | 宿主 slot 契约 | 与宿主 UI 强耦合 | `src/ui/*` 独立 SPA | REPLACE | done | `tests/api.test.ts`（静态资源） |
+| H2 | 6 页签信息架构 | `client.js:13328-13335` | 状态/提示词/规则/技能/演练台/更多 | — | 8 屏：概览/宿主/诊断/快照/修改包/编排/调度/审计 | KEEP（IA 延长） | done | 手工验收 |
 | H3 | 补丁逐条状态 + 分组计数 | `client.js:10120-10218` | 三分母（applied/total/na） | — | UI + API | KEEP | planned | — |
-| H4 | 状态→视觉分档 | `client.js:10049-10074` | 12 状态 → ok/wait/bad/miss/muted | — | UI 词表 | KEEP | planned | — |
-| H5 | 「不假装成功」语义 | `client.js` listState/unavailableStatus | loading/ready/error + 写后重读 | — | API 统一 `{ok,data|error}` | KEEP | planned | — |
+| H4 | 状态→视觉分档 | `client.js:10049-10074` | 12 状态 → ok/wait/bad/miss/muted | — | `ui/app.js:statusKind()` | KEEP | done | 手工验收 |
+| H5 | 「不假装成功」语义 | `client.js` listState/unavailableStatus | loading/ready/error + 写后重读 | — | API 统一 `{ok,data|error}` + UI 显示真实错误 | KEEP | done | `tests/api.test.ts` |
 | H6 | 维护中心（更新/备份/卸载） | `client.js:10759-10968` | 15 phase 文案 | — | UI 维护屏 | IMPROVE | planned | — |
-| H7 | 一键安装 bat（关进程→装→打补丁→重开） | `一键安装.bat:42`、`apply-driver.mjs` | 先杀后验 | 失败不回滚 | `cli install --verify-first` | REFACTOR | planned | — |
+| H7 | 一键安装 bat（关进程→装→打补丁→重开） | `一键安装.bat:42`、`apply-driver.mjs` | 先杀后验 | 失败不回滚 | `cli install --verify-first` | REFACTOR | planned | —（v0.2） |
 | H8 | Windows 换包助手 | `windows-asar-handoff.js:150-166` | broker + Job Object | 参数打包错误，实际不可用 | — | DEFER（Purge+ v0.1 不换包） | — | — |
 | H9 | macOS ⌘Q 换包变体 | `macos-asar-handoff.js:160-176` | 硬链接保 inode | — | — | DEFER | — | — |
 | H10 | 前端构建脚本 | `build-client.mjs`、`patch-client-dock.mjs` | 切字符串注入 | 本包内直接抛错 | 零构建 | REMOVE（问题消失） | — | — |

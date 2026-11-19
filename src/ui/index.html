@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Purge+ · Agent 运维控制台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">P+</span>
+        <div>
+          <h1>Purge+</h1>
+          <p class="sub" id="health">连接中…</p>
+        </div>
+      </div>
+      <div class="topbar-status" id="topbar-status"></div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="overview">概览</button>
+      <button class="tab" data-view="hosts">宿主</button>
+      <button class="tab" data-view="diagnostics">诊断</button>
+      <button class="tab" data-view="snapshots">快照</button>
+      <button class="tab" data-view="packs">修改包</button>
+      <button class="tab" data-view="workflows">编排</button>
+      <button class="tab" data-view="jobs">调度</button>
+      <button class="tab" data-view="audit">审计</button>
+    </nav>
+
+    <main id="view">
+      <section class="loading">加载中…</section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
