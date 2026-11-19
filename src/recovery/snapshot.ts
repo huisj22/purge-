@@ -484,7 +484,19 @@ export class SnapshotStore {
   }
 
   /** 清理没有任何快照引用的对象（GC）。引用集覆盖**所有**快照（P3-20 修复）。 */
+  /**
+   * 对象 GC（Phase 5.5 加固）。
+   *
+   * 与 capture 使用同一把跨进程锁：capture 在"写对象 → 插行"之间持锁，
+   * 因此 GC 不可能删掉"已写入但尚未被任何 manifest 引用"的对象。
+   * 无法识别为 64 位十六进制哈希的文件一律保留（UNKNOWN 不删除）。
+   */
   async prune(): Promise<{ removed: number; kept: number }> {
+    return withWriteGuard(this.dataDir, { resource: "snapshot", scope: "snapshot", operation: "snapshot.prune", waitMs: 5000 }, () => this.#pruneLocked());
+  }
+
+  async #pruneLocked(): Promise<{ removed: number; kept: number }> {
+    const HASH_RE = /^[0-9a-f]{64}$/;
     const referenced = new Set<string>();
     const rows = this.db.raw.prepare("SELECT manifest FROM snapshot").all() as unknown as Array<{ manifest: string }>;
     for (const row of rows) {
@@ -503,6 +515,11 @@ export class SnapshotStore {
           if (left.length === 0) await fsp.rmdir(abs).catch(() => {});
         } else {
           const hash = `${path.basename(dir)}${child.name}`;
+          if (!HASH_RE.test(hash)) {
+            // 名字不是合法哈希：来源不明 → 保留（不猜测、不删除）
+            kept += 1;
+            continue;
+          }
           if (referenced.has(hash)) kept += 1;
           else {
             await fsp.rm(abs, { force: true });

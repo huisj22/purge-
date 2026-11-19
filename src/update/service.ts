@@ -192,18 +192,46 @@ export class UpdateService {
   }
 
   /** 清理旧版本目录，只保留最近 keep 个（P3-10）。备份目录不清理。 */
-  async prune(keep = 3): Promise<{ removed: string[]; kept: string[] }> {
+  /**
+   * 旧版本清理（Phase 5.5 加固）。
+   *
+   * 保护规则：
+   * 1. 当前活跃版本永不删除。
+   * 2. 最新版本永不删除（即使它不是活跃版本）。
+   * 3. 至少保留 minKeep(2) 个版本：一个是活跃版本，一个是可回滚版本。
+   * 4. 无法确认的条目（名字不符合 semver / 读取失败）一律保留。
+   * 5. 全程持跨进程锁，与 activate 串行。
+   */
+  async prune(keep = 3): Promise<{ removed: string[]; kept: string[]; protected: string[] }> {
+    return withWriteGuard(this.#o.dataDir, { resource: "update", scope: "update", operation: "update.prune", waitMs: 5000 }, () => this.#pruneLocked(keep));
+  }
+
+  async #pruneLocked(keep: number): Promise<{ removed: string[]; kept: string[]; protected: string[] }> {
+    const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+    const minKeep = Math.max(2, Math.floor(keep));
     const versionsDir = path.join(this.dir, "versions");
-    const entries = await fsp.readdir(versionsDir).catch(() => [] as string[]);
+    const entries = (await fsp.readdir(versionsDir).catch(() => [] as string[])).filter((e) => !e.startsWith("."));
     const state = await this.#readState();
-    const candidates = entries.filter((e) => !e.startsWith(".") && e !== state.activeVersion).sort((a, b) => compareVersions(b, a));
-    const removable = candidates.slice(Math.max(0, keep - 1));
+    const protectedNames = new Set<string>();
+    if (state.activeVersion) protectedNames.add(state.activeVersion);
+    const raw = entries.filter((e) => SEMVER_RE.test(e));
+    const unknown = entries.filter((e) => !SEMVER_RE.test(e));
+    const sorted = [...raw].sort((a, b) => compareVersions(b, a));
+    if (sorted.length > 0) protectedNames.add(sorted[0] as string); // 最新版本
+    const candidates = sorted.filter((e) => !protectedNames.has(e));
+    // 版本预算只算受保护的版本；UNKNOWN 不计入预算但一定保留
+    const keepVersioned = Math.max(minKeep, protectedNames.size);
+    const budget = Math.max(0, keepVersioned - protectedNames.size);
+    const allowedToRemove = Math.max(0, candidates.length - budget);
+    // candidates 为降序，最旧的在末尾
+    const removable = candidates.slice(candidates.length - allowedToRemove);
     const removed: string[] = [];
     for (const e of removable) {
       await removeTreeNoFollow(path.join(versionsDir, e));
       removed.push(e);
     }
-    return { removed, kept: entries.filter((e) => !removed.includes(e)) };
+    const kept = entries.filter((e) => !removed.includes(e));
+    return { removed, kept, protected: [...protectedNames, ...unknown] };
   }
 
   async status(): Promise<{ activeVersion?: string; activeDir?: string; lastCheck?: UpdateCheck }> {

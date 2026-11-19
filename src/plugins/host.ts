@@ -172,6 +172,10 @@ export class PluginHost {
   }
 
   async enable(name: string, opts: { trusted?: boolean } = {}): Promise<InstalledPlugin> {
+    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.enable", waitMs: 5000 }, () => this.#enableLocked(name, opts));
+  }
+
+  async #enableLocked(name: string, opts: { trusted?: boolean } = {}): Promise<InstalledPlugin> {
     const plugin = await this.#find(name);
     if (this.#o.isolation === "process") {
       // 进程隔离模式（T-036）：插件跑在独立子进程，能力调用由 Host 审批
@@ -230,6 +234,10 @@ export class PluginHost {
   }
 
   async disable(name: string): Promise<InstalledPlugin> {
+    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.disable", waitMs: 5000 }, () => this.#disableLocked(name));
+  }
+
+  async #disableLocked(name: string): Promise<InstalledPlugin> {
     const worker = this.#workers.get(name);
     if (worker) {
       await worker.stop();

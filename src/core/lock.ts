@@ -78,6 +78,9 @@ export interface AcquireOptions {
 
 const LOCK_VERSION = 1;
 const HARD_STALE_MS = 24 * 60 * 60 * 1000; // 超过 24h 的锁一律视为需要人工确认
+// 锁目录存在但 owner.json 缺失时的宽限期：这通常是"正在创建/正在释放"的瞬时窗口，
+// 宽限期内按 BUSY 处理（可重试），超时才升级为 RECOVERY_REQUIRED（不自动夺取）。
+const MISSING_METADATA_GRACE_MS = 3000;
 
 export function lockDirRoot(dataDir: string): string {
   return path.join(dataDir, "locks");
@@ -146,6 +149,19 @@ export class FileLock {
     // 已存在：读取持有者并判定
     const existing = await this.#readOwner();
     if (!existing.ok) {
+      if (existing.missing) {
+        // 目录存在但元数据缺失：可能是另一进程正在创建/释放锁的瞬时窗口。
+        // 在宽限期内按 BUSY 处理（可重试），超过宽限期才升级为 RECOVERY_REQUIRED。
+        const age = await this.#dirAgeMs();
+        if (age === null) {
+          // 目录在读取瞬间已被释放（rename 走掉了）→ 视为瞬时竞争，重试即可
+          return { state: "BUSY", path: this.dir, detail: "lock directory vanished during inspection" };
+        }
+        if (age < MISSING_METADATA_GRACE_MS) {
+          return { state: "BUSY", path: this.dir, detail: `lock metadata missing (likely transient, age ${age}ms)` };
+        }
+        return { state: "RECOVERY_REQUIRED", path: this.dir, detail: `${existing.detail} (age ${age}ms)` };
+      }
       return { state: "RECOVERY_REQUIRED", path: this.dir, detail: existing.detail };
     }
     const observed = existing.owner;
@@ -182,7 +198,17 @@ export class FileLock {
       return { ok: false, detail: `lock was taken over by ${current.owner.lockId}` };
     }
     try {
-      await fsp.rm(this.dir, { recursive: true, force: true });
+      // 先整体改名再删除：否则 rm -r 期间会短暂出现"锁目录存在但没有 owner.json"，
+      // 竞争者会把它判成 RECOVERY_REQUIRED（真实竞态，测试中已复现）。
+      const gone = `${this.dir}.released-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      try {
+        await fsp.rename(this.dir, gone);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        this.#owner = null;
+        return { ok: true };
+      }
+      await fsp.rm(gone, { recursive: true, force: true }).catch(() => {});
       this.#owner = null;
       return { ok: true };
     } catch (err) {
@@ -230,13 +256,25 @@ export class FileLock {
     };
   }
 
-  async #readOwner(): Promise<{ ok: true; owner: LockOwner } | { ok: false; detail: string }> {
+  /** 锁目录的存在时长（毫秒）；读不到返回 null。 */
+  async #dirAgeMs(): Promise<number | null> {
+    try {
+      const st = await fsp.stat(this.dir);
+      return Date.now() - st.mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  async #readOwner(): Promise<{ ok: true; owner: LockOwner } | { ok: false; detail: string; missing?: boolean }> {
     const file = path.join(this.dir, "owner.json");
     let text: string;
     try {
       text = await fsp.readFile(file, "utf8");
     } catch (err) {
-      return { ok: false, detail: `owner.json unreadable: ${asPurgeError(err).message}` };
+      const code = (err as NodeJS.ErrnoException).code;
+      // 缺失 与 损坏 必须区分：缺失可能是"正在创建/正在释放"的瞬时窗口。
+      return { ok: false, detail: `owner.json unreadable: ${asPurgeError(err).message}`, missing: code === "ENOENT" };
     }
     let parsed: unknown;
     try {

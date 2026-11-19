@@ -5,6 +5,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWriteFile, ensureDir, readJson } from "../core/atomic.ts";
 import { purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import { packHash, validatePack, type Pack } from "./schema.ts";
 
 export interface StoredPack {
@@ -31,13 +32,20 @@ interface PackIndex {
 }
 
 export class PackStore {
+  readonly dataDir: string;
   readonly dir: string;
 
   constructor(dataDir: string) {
+    this.dataDir = dataDir;
     this.dir = path.join(dataDir, "packs");
   }
 
   async importPack(input: unknown, source: string): Promise<StoredPack> {
+    // 跨进程互斥：index.json 是"读-改-写"，无锁时两个进程会互相覆盖（丢条目）
+    return withWriteGuard(this.dataDir, { resource: "packs", scope: "pack", operation: "pack.import", waitMs: 5000 }, () => this.#importPackLocked(input, source));
+  }
+
+  async #importPackLocked(input: unknown, source: string): Promise<StoredPack> {
     const pack = validatePack(input);
     const hash = packHash(pack);
     await ensureDir(this.dir);

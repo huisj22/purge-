@@ -135,6 +135,25 @@ const MIGRATIONS: Array<{ version: number; apply: (db: DatabaseSync) => void }> 
       `);
     },
   },
+  {
+    version: 5,
+    apply: (db) => {
+      // Phase 5.5：审计裁剪的完整性锚点。
+      // 裁剪会删除旧记录；若不记录"删到哪个 seq、被删链尾的 hash"，剩余链无法自证连续。
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_checkpoint(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pruned_up_to_seq INTEGER NOT NULL,
+          pruned_count INTEGER NOT NULL,
+          head_hash TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          ts TEXT NOT NULL,
+          reason TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_checkpoint_seq ON audit_checkpoint(pruned_up_to_seq);
+      `);
+    },
+  },
 ];
 export interface Database {
   readonly raw: DatabaseSync;
