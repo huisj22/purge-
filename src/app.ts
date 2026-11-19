@@ -7,12 +7,13 @@
  * - 数据目录可通过参数/环境变量覆盖，测试用临时目录。
  */
 import * as path from "node:path";
-import { homedir } from "node:os";
+import { homedir, hostname, userInfo } from "node:os";
 import { DshHostAdapter } from "./adapters/dsh.ts";
 import type { HostAdapter } from "./adapters/types.ts";
-import { type PurgeConfig, ConfigStore } from "./core/config.ts";
+import { ConfigStore } from "./core/config.ts";
 import { EventBus } from "./core/events.ts";
 import { Kernel } from "./core/kernel.ts";
+import { PurgeError } from "./core/errors.ts";
 import { createLogger, type Logger } from "./core/logger.ts";
 import { DiagnosticsService } from "./inspector/diagnostics.ts";
 import { PackEngine } from "./packs/engine.ts";
@@ -27,6 +28,7 @@ import { SnapshotStore } from "./recovery/snapshot.ts";
 import { Transaction } from "./recovery/transaction.ts";
 import { Scheduler, type JobSpec } from "./scheduler/scheduler.ts";
 import { evaluatePolicy, guard, type PolicyConfig, type PolicyVerdict, type ActionRequest, type GuardOptions } from "./security/policy.ts";
+import { PolicyStore, type Role } from "./security/policy-store.ts";
 import { AuditLog } from "./storage/audit.ts";
 import { type Database, openDatabase } from "./storage/database.ts";
 import { LogStore } from "./storage/logs.ts";
@@ -73,6 +75,7 @@ export interface AppServices {
   workflow: WorkflowEngine;
   scheduler: Scheduler;
   configCenter: ConfigCenter;
+  policyStore: PolicyStore;
   plugins: PluginHost;
   updates: UpdateService;
   rules: RuleStore;
@@ -137,6 +140,7 @@ export class PurgeApp {
     const plugins = new PluginHost({
       dataDir,
       logger: this.logger,
+      isolation: cfg.plugins.isolation === "process" ? "process" : "in-process",
       resolveService: (capability) => resolveCapability(servicesRef.value, capability),
     });
     const updates = new UpdateService({
@@ -146,12 +150,16 @@ export class PurgeApp {
       channel: cfg.update.channel,
       ...(cfg.update.indexUrl ? { indexSource: cfg.update.indexUrl } : {}),
     });
+    const policyStore = new PolicyStore(dataDir, {
+      onChange: (event) => audit.append({ actor: "policy", action: event.type, target: "policy", risk: 0, detail: event.detail }),
+    });
     const configCenter = new ConfigCenter(dataDir);
     const rules = new RuleStore(dataDir);
     const skills = new SkillLibrary(dataDir);
     const packs = new PackStore(dataDir);
     const packEngine = new PackEngine({
       snapshots,
+      dataDir,
       createTransaction: async (label, targets) => {
         const tx = new Transaction(label, {
           snapshots,
@@ -193,6 +201,7 @@ export class PurgeApp {
       workflow,
       scheduler,
       configCenter,
+      policyStore,
       plugins,
       updates,
       rules,
@@ -225,6 +234,14 @@ export class PurgeApp {
     this.logger.info("purge+ stopped");
   }
 
+  /** 人类操作（CLI/API/UI）默认视为本机操作者；其它来源按实际 actor 判定。 */
+  #subjectFor(actor: string, origin: ActionRequest["origin"]): string {
+    if (origin === "human" && ["cli", "api", "ui"].includes(actor)) {
+      return `${userInfo().username}@${hostname()}`;
+    }
+    return actor;
+  }
+
   policyConfig(): PolicyConfig {
     const p = this.services.config.get().policy;
     return { confirmThreshold: p.confirmThreshold, denyThreshold: p.denyThreshold, allowActions: p.allowActions };
@@ -241,6 +258,17 @@ export class PurgeApp {
     const s = this.services;
     try {
       guard(req, this.policyConfig(), opts);
+      // 权限层（P2-10）：风险层通过后，还要确认该主体有权执行该等级的动作
+      const role: Role = req.origin === "ai" ? "advisor" : req.origin === "plugin" || req.origin === "scheduler" ? "executor" : "owner";
+      const subject = this.#subjectFor(actor, req.origin);
+      const authority = await s.policyStore.evaluate({ actor: subject, role, action: req.action });
+      if (authority.decision === "deny") {
+        throw new PurgeError({
+          code: "policy_denied",
+          message: `authority denied for ${req.action}: ${authority.reason}`,
+          detail: { level: authority.level, role, subject, reason: authority.reason },
+        });
+      }
     } catch (err) {
       s.audit.append({
         actor,
