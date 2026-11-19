@@ -48,6 +48,8 @@ const HELP = `Purge+ ${APP_VERSION}
   diagnose [<hostId>] [--all]     运行诊断
   snapshot list|capture <label> <paths...>|restore <id>|verify <id>
   pack list|import <file>|plan <id> <hostId>|apply <id> <hostId>|revert <snapshotId>
+  rule list|add <id> <title> --body <text>|show <id>|on|off|rm <id>|compose [--workspace <dir>]
+  skill list|scan <root>|add <dir> [--overwrite]|rm <name>
   workflow list|run <id>|runs
   job list|add <id> <workflowId> <cron|间隔秒>|pause <id>|resume <id>|rm <id>
   audit [--limit N]               审计（含链校验）
@@ -323,6 +325,98 @@ async function main(argv: string[]): Promise<number> {
           );
           out(result, `已恢复 ${result.restored.length} 个文件，失败 ${result.failed.length} 个`);
           return result.failed.length === 0 ? EXIT.ok : EXIT.failed;
+        }
+        break;
+      }
+
+      case "rule": {
+        const flagValue = (name: string): string | undefined => {
+          const i = rest.indexOf(name);
+          return i >= 0 ? rest[i + 1] : undefined;
+        };
+        if (sub === "list") {
+          const list = await s.rules.list();
+          out(
+            list.map((r) => ({ id: r.id, title: r.title, enabled: r.enabled, scope: r.scope, version: r.version })),
+            list.map((r) => `${r.id}\t${r.enabled ? "on " : "off"}\t${r.scope.kind}${r.scope.kind === "workspace" ? `:${r.scope.path}` : ""}\t${r.title}`).join("\n") || "还没有规则",
+          );
+          return EXIT.ok;
+        }
+        if (sub === "add" && rest[0] && rest[1]) {
+          const body = flagValue("--body") ?? (flagValue("--body-file") ? await (await import("node:fs/promises")).readFile(path.resolve(flagValue("--body-file") as string), "utf8") : undefined);
+          if (!body) throw new PurgeError({ code: "invalid_argument", message: "需要 --body 或 --body-file" });
+          const workspace = flagValue("--workspace");
+          const { result } = await app.guarded(
+            "cli",
+            { action: "config.set", target: `rule:${rest[0]}`, paths: [s.rules.dir], origin: "human" },
+            () =>
+              s.rules.create({
+                id: rest[0] as string,
+                title: rest[1] as string,
+                body,
+                ...(workspace ? { scope: { kind: "workspace" as const, path: path.resolve(workspace) } } : {}),
+              }),
+            { confirmed: flags.yes },
+          );
+          out(result, `已创建规则 ${result.id}（v${result.version}）`);
+          return EXIT.ok;
+        }
+        if (sub === "show" && rest[0]) {
+          const rule = await s.rules.get(rest[0]);
+          out(rule, s.rules.exportMarkdown(rule));
+          return EXIT.ok;
+        }
+        if ((sub === "rm" || sub === "remove") && rest[0]) {
+          await app.guarded("cli", { action: "config.set", target: `rule:${rest[0]}`, paths: [s.rules.dir], origin: "human" }, async () => {
+            await s.rules.remove(rest[0] as string);
+            return null;
+          }, { confirmed: true });
+          out({ removed: rest[0] }, `已删除 ${rest[0]}`);
+          return EXIT.ok;
+        }
+        if (sub === "on" || sub === "off") {
+          if (!rest[0]) break;
+          const rule = await s.rules.update(rest[0], { enabled: sub === "on" });
+          out(rule, `${rule.id} → ${rule.enabled ? "启用" : "停用"}`);
+          return EXIT.ok;
+        }
+        if (sub === "compose") {
+          const workspace = flagValue("--workspace");
+          const composed = await s.rules.compose(workspace ? { workspace } : {});
+          out(composed, composed.text || "（没有生效规则）");
+          return EXIT.ok;
+        }
+        break;
+      }
+
+      case "skill": {
+        if (sub === "list") {
+          const list = await s.skills.list();
+          out(
+            list,
+            list.map((k) => `${k.name}\t${k.files} 文件\t${k.bytes} 字节\t${k.description}${k.warnings.length ? `\t⚠${k.warnings.length}` : ""}`).join("\n") || "还没有技能",
+          );
+          return EXIT.ok;
+        }
+        if (sub === "scan" && rest[0]) {
+          const found = await s.skills.scan([path.resolve(rest[0])]);
+          out(found, found.map((k) => `${k.name}\t${k.description}\t${k.warnings.length ? `⚠${k.warnings.length}` : "ok"}`).join("\n") || "该目录下没有技能");
+          return EXIT.ok;
+        }
+        if (sub === "add" && rest[0]) {
+          const { result } = await app.guarded(
+            "cli",
+            { action: "config.set", target: `skill:${rest[0]}`, paths: [s.skills.dir], origin: "human" },
+            () => s.skills.import(path.resolve(rest[0] as string), { overwrite: rest.includes("--overwrite") }),
+            { confirmed: flags.yes },
+          );
+          out(result, `已导入技能 ${result.name}（${result.files} 文件 / ${result.bytes} 字节${result.warnings.length ? `，${result.warnings.length} 条提示` : ""}）`);
+          return EXIT.ok;
+        }
+        if ((sub === "rm" || sub === "remove") && rest[0]) {
+          await app.guarded("cli", { action: "config.set", target: `skill:${rest[0]}`, paths: [s.skills.dir], origin: "human" }, () => s.skills.remove(rest[0] as string), { confirmed: true });
+          out({ removed: rest[0] }, `已删除技能 ${rest[0]}`);
+          return EXIT.ok;
         }
         break;
       }

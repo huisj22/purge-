@@ -17,6 +17,8 @@ import { createLogger, type Logger } from "./core/logger.ts";
 import { DiagnosticsService } from "./inspector/diagnostics.ts";
 import { PackEngine } from "./packs/engine.ts";
 import { PackStore } from "./packs/store.ts";
+import { RuleStore } from "./ruleskills/rules.ts";
+import { SkillLibrary } from "./ruleskills/skills.ts";
 import { HostRegistry } from "./registry/registry.ts";
 import { SnapshotStore } from "./recovery/snapshot.ts";
 import { Transaction } from "./recovery/transaction.ts";
@@ -65,6 +67,8 @@ export interface AppServices {
   diagnostics: DiagnosticsService;
   workflow: WorkflowEngine;
   scheduler: Scheduler;
+  rules: RuleStore;
+  skills: SkillLibrary;
   packs: PackStore;
   packEngine: PackEngine;
   logger: Logger;
@@ -118,6 +122,8 @@ export class PurgeApp {
     ];
     for (const adapter of adapters) registry.addAdapter(adapter);
     const diagnostics = new DiagnosticsService({ registry, db, audit, traces, metrics, logger: this.logger, bus: this.bus });
+    const rules = new RuleStore(dataDir);
+    const skills = new SkillLibrary(dataDir);
     const packs = new PackStore(dataDir);
     const packEngine = new PackEngine({
       snapshots,
@@ -160,6 +166,8 @@ export class PurgeApp {
       diagnostics,
       workflow,
       scheduler,
+      rules,
+      skills,
       packs,
       packEngine,
       logger: this.logger,

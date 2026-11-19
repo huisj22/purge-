@@ -89,10 +89,10 @@
 
 | # | 原功能 | 实现位置 | 工作机制 | 原限制 | Purge+ 模块 | 策略 | 实现 | 测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| F1 | 规则集（单活 + 写 AGENTS.md） | `rules.js:161-284` | 激活写宿主文件，首次备份 | 双指令并存风险 | `configcenter` + `ruleskills` | IMPROVE（多槽位） | planned | — |
-| F2 | cwd 规则（路径勾选） | `rules.js:396-560` | 只存绝对路径，注入前重新命中 | 512KB 上限 | `ruleskills` scope | KEEP | planned | — |
-| F3 | 技能库（bundle/flat） | `skills.js:105-236` | frontmatter 子集解析 + 路径围栏 | `lib/skills.js:80` 漏 import `fs` 被静默降级 | `ruleskills/skills.ts` | REFACTOR | planned | — |
-| F4 | 技能导入安全检查 | `skills.js:411-447` | 12/50MB 上限 + 覆盖前备份 | 软链保护失效 | `ruleskills` 校验 | IMPROVE | planned | — |
+| F1 | 规则集（单活 + 写 AGENTS.md） | `rules.js:161-284` | 激活写宿主文件，首次备份 | 双指令并存风险 | `src/ruleskills/rules.ts`（多槽位 + 组装，不写宿主） | IMPROVE | done | `tests/ruleskills.test.ts` |
+| F2 | cwd 规则（路径勾选） | `rules.js:396-560` | 只存绝对路径，注入前重新命中 | 512KB 上限 | `RuleStore.compose({workspace})` 前缀匹配 | KEEP | done | `tests/ruleskills.test.ts` |
+| F3 | 技能库（bundle/flat） | `skills.js:105-236` | frontmatter 子集解析 + 路径围栏 | `lib/skills.js:80` 漏 import `fs` 被静默降级 | `src/ruleskills/skills.ts` | REFACTOR | done | `tests/ruleskills.test.ts` |
+| F4 | 技能导入安全检查 | `skills.js:411-447` | 12/50MB 上限 + 覆盖前备份 | 软链保护失效 | 体积/文件数上限 + 符号链接跳过 + 可执行内容告警 + 内容寻址备份 | IMPROVE | done | `tests/ruleskills.test.ts` |
 | F5 | 预设落盘与注册 | `presets.js:32-56`、`presets-plugin.js` | `.agent-presets/<name>` + registry | 40×500ms 重试 | `configcenter.presets` | REFACTOR | planned | — |
 | F6 | `toolFilter → agentPreset` 迁移 | `preset-compat.js:69-215` | 内容寻址私有备份后转换 | 未知策略即停 | `configcenter` 迁移器 | KEEP | planned | — |
 | F7 | 会话回退（rewind） | `rewind.js:517-673` | 裁剪 surfaceOp + 3 层自检 | 依赖 4 条前端补丁 | — | DEFER（属宿主会话能力） | — | — |

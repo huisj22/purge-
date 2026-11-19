@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -227,6 +227,74 @@ describe("http api", () => {
     const res = await api(base, "POST", "/api/packs/import", { pack: bad, confirm: true });
     assert.equal(res.status, 400);
     assert.equal(res.json.error?.code, "schema_invalid");
+  });
+
+  it("manages rules and composes them by workspace", async () => {
+    const created = await api<{ id: string; version: number }>(base, "POST", "/api/rules", {
+      id: "style",
+      title: "代码风格",
+      body: "用 4 空格缩进",
+      confirm: true,
+    });
+    assert.equal(created.status, 200);
+    assert.equal(created.json.data?.version, 1);
+
+    const ws = path.join(tmp, "workspace");
+    await api(base, "POST", "/api/rules", {
+      id: "proj",
+      title: "项目规则",
+      body: "只用 ESM",
+      scope: { kind: "workspace", path: ws },
+      confirm: true,
+    });
+
+    const composedIn = await api<{ included: string[]; text: string }>(base, "POST", "/api/rules/compose", { workspace: path.join(ws, "sub") });
+    assert.deepEqual(composedIn.json.data?.included, ["proj", "style"]);
+    assert.match(composedIn.json.data?.text ?? "", /只用 ESM/);
+
+    const composedOut = await api<{ included: string[] }>(base, "POST", "/api/rules/compose", { workspace: path.join(tmp, "elsewhere") });
+    assert.deepEqual(composedOut.json.data?.included, ["style"]);
+
+    const disabled = await api<{ enabled: boolean }>(base, "POST", "/api/rules/style/disable", { confirm: true });
+    assert.equal(disabled.json.data?.enabled, false);
+    const afterDisable = await api<{ included: string[] }>(base, "POST", "/api/rules/compose", {});
+    assert.ok(!(afterDisable.json.data?.included ?? []).includes("style"));
+
+    const removed = await api(base, "DELETE", "/api/rules/proj");
+    assert.equal(removed.status, 200);
+    const list = await api<Array<{ id: string }>>(base, "GET", "/api/rules");
+    assert.deepEqual(list.json.data?.map((r) => r.id), ["style"]);
+  });
+
+  it("rejects invalid rules with a typed error", async () => {
+    const bad = await api(base, "POST", "/api/rules", { id: "Bad Id", title: "x", body: "y", confirm: true });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.json.error?.code, "schema_invalid");
+  });
+
+  it("imports, lists and removes skills", async () => {
+    const src = path.join(tmp, "skill-src", "demo-skill");
+    await mkdir(src, { recursive: true });
+    await writeFile(path.join(src, "SKILL.md"), ["---", "name: demo-skill", "description: 演示技能", "---", "", "正文"].join("\n"));
+    await writeFile(path.join(src, "run.sh"), "echo hi");
+
+    const scanned = await api<Array<{ name: string; warnings: Array<{ code: string }> }>>(
+      base,
+      "GET",
+      `/api/skills/scan?root=${encodeURIComponent(path.join(tmp, "skill-src"))}`,
+    );
+    assert.equal(scanned.json.data?.[0]?.name, "demo-skill");
+    assert.ok((scanned.json.data?.[0]?.warnings ?? []).some((w) => w.code === "executable_content"));
+
+    const imported = await api<{ name: string }>(base, "POST", "/api/skills/import", { path: src, confirm: true });
+    assert.equal(imported.json.data?.name, "demo-skill");
+    const list = await api<Array<{ name: string }>>(base, "GET", "/api/skills");
+    assert.deepEqual(list.json.data?.map((s) => s.name), ["demo-skill"]);
+
+    const removed = await api(base, "POST", `/api/skills/demo-skill/remove`, {});
+    assert.equal(removed.status, 200);
+    const after = await api<Array<unknown>>(base, "GET", "/api/skills");
+    assert.deepEqual(after.json.data, []);
   });
 
   it("serves the ui shell and its assets", async () => {

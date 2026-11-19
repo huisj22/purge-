@@ -613,12 +613,152 @@ async function applyPack(id, hostId, box) {
   }
 }
 
+async function viewRules(root) {
+  const [rules, skills] = await Promise.all([api("/api/rules"), api("/api/skills")]);
+  const idInput = h("input", { placeholder: "规则 id", size: "12" });
+  const titleInput = h("input", { placeholder: "标题", size: "14" });
+  const bodyInput = h("input", { placeholder: "规则正文", size: "34" });
+  const wsInput = h("input", { placeholder: "工作区路径（可选）", size: "30" });
+  const skillPath = h("input", { placeholder: "技能目录绝对路径", size: "46" });
+  const composeBox = h("div", { class: "section" });
+
+  root.append(
+    h("div", { class: "section" }, [
+      h("h3", { text: "规则" }),
+      h("div", { class: "actions" }, [
+        idInput,
+        titleInput,
+        bodyInput,
+        wsInput,
+        h("button", {
+          class: "action primary",
+          text: "新建规则",
+          onclick: async () => {
+            const body = { id: idInput.value.trim(), title: titleInput.value.trim(), body: bodyInput.value.trim(), confirm: true };
+            if (wsInput.value.trim()) body.scope = { kind: "workspace", path: wsInput.value.trim() };
+            try {
+              await api("/api/rules", { method: "POST", body });
+              toast(`已创建 ${body.id}`);
+              render();
+            } catch (err) {
+              toast(`创建失败：${err.message}`, true);
+            }
+          },
+        }),
+        h("button", {
+          class: "action",
+          text: "组装预览",
+          onclick: async () => {
+            const ws = wsInput.value.trim();
+            try {
+              const r = await api("/api/rules/compose", { method: "POST", body: ws ? { workspace: ws } : {} });
+              composeBox.replaceChildren(
+                h("h3", { text: `组装结果（${r.included.length} 条生效）` }),
+                h("div", { class: "pre", text: r.text || "（没有生效规则）" }),
+                ...r.skipped.map((s) => h("div", { class: "hint", text: `跳过 ${s.id}：${s.reason}` })),
+              );
+            } catch (err) {
+              toast(`组装失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "id" }), h("th", { text: "标题" }), h("th", { text: "作用域" }), h("th", { text: "状态" }), h("th", { text: "操作" })]),
+          ...(rules.length
+            ? rules.map((r) =>
+                h("tr", {}, [
+                  h("td", { class: "mono", text: r.id }),
+                  h("td", { text: r.title }),
+                  h("td", { class: "mono", text: r.scope.kind === "global" ? "global" : r.scope.path }),
+                  h("td", {}, [pill(r.enabled ? "启用" : "停用", r.enabled ? "ok" : "muted")]),
+                  h("td", {}, [
+                    h("button", {
+                      class: "action",
+                      text: r.enabled ? "停用" : "启用",
+                      onclick: async () => {
+                        await api(`/api/rules/${r.id}/${r.enabled ? "disable" : "enable"}`, { method: "POST", body: { confirm: true } });
+                        render();
+                      },
+                    }),
+                    " ",
+                    h("button", {
+                      class: "action danger",
+                      text: "删除",
+                      onclick: async () => {
+                        if (!confirm(`删除规则 ${r.id}？`)) return;
+                        await api(`/api/rules/${r.id}`, { method: "DELETE" });
+                        render();
+                      },
+                    }),
+                  ]),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "5", class: "empty", text: "还没有规则" })])]),
+        ],
+      ),
+      composeBox,
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "技能" }),
+      h("div", { class: "actions" }, [
+        skillPath,
+        h("button", {
+          class: "action primary",
+          text: "导入技能",
+          onclick: async () => {
+            try {
+              const r = await api("/api/skills/import", { method: "POST", body: { path: skillPath.value.trim(), confirm: true } });
+              toast(`已导入 ${r.name}${r.warnings.length ? `（${r.warnings.length} 条提示）` : ""}`);
+              render();
+            } catch (err) {
+              toast(`导入失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "名称" }), h("th", { text: "说明" }), h("th", { text: "文件/字节" }), h("th", { text: "提示" }), h("th", { text: "" })]),
+          ...(skills.length
+            ? skills.map((k) =>
+                h("tr", {}, [
+                  h("td", { class: "mono", text: k.name }),
+                  h("td", { text: k.description }),
+                  h("td", { text: `${k.files} / ${k.bytes}` }),
+                  h("td", {}, k.warnings.length ? k.warnings.map((w) => pill(w.code, "warn")) : [pill("无", "muted")]),
+                  h("td", {}, [
+                    h("button", {
+                      class: "action danger",
+                      text: "删除",
+                      onclick: async () => {
+                        if (!confirm(`删除技能 ${k.name}？`)) return;
+                        await api(`/api/skills/${k.name}/remove`, { method: "POST", body: {} });
+                        render();
+                      },
+                    }),
+                  ]),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "5", class: "empty", text: "还没有技能" })])]),
+        ],
+      ),
+    ]),
+  );
+}
+
 const VIEWS = {
   overview: viewOverview,
   hosts: viewHosts,
   diagnostics: viewDiagnostics,
   snapshots: viewSnapshots,
   packs: viewPacks,
+  rules: viewRules,
   workflows: viewWorkflows,
   jobs: viewJobs,
   audit: viewAudit,

@@ -23,6 +23,6 @@
 | T-017 | 修改包引擎（schema/plan/apply/revert） | P0 | done | T-005,T-012 | 假宿主 apply→verify→revert | packs tests |
 | T-018 | 插件宿主与清单 | P2 | todo | T-013 | 安装/启用/越权拒绝 | plugins tests |
 | T-019 | 更新中心（离线索引+分阶段） | P2 | todo | T-005 | 失败阶段明确、不虚报成功 | update tests |
-| T-020 | 规则/技能中心 | P2 | todo | T-013 | CRUD + 导入安全校验 | ruleskills tests |
+| T-020 | 规则/技能中心 | P2 | done | T-013 | CRUD + 导入安全校验 | ruleskills tests |
 | T-021 | README 与安装说明 | P1 | done | T-015 | 新机器按文档可跑 | 人工验证 |
 | T-022 | 端到端验收脚本 | P1 | todo | T-015,T-016 | 一条命令跑完整链路 | e2e 脚本 |

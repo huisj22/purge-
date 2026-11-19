@@ -318,6 +318,105 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
       }
     }
 
+    if (resource === "rules") {
+      if (method === "GET" && !id) return s.rules.list();
+      if (method === "GET" && id) return s.rules.get(id);
+      if (method === "POST" && !id) {
+        const body = await readJson(req, maxBody);
+        if (typeof body.markdown === "string") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "config.set", target: "rules:import", paths: [s.rules.dir], origin: "human" },
+            () => s.rules.importMarkdown(body.markdown as string, { overwrite: body.overwrite === true }),
+            { confirmed: body.confirm === true },
+          );
+          return result;
+        }
+        const { result } = await app.guarded(
+          "api",
+          { action: "config.set", target: `rule:${String(body.id ?? "")}`, paths: [s.rules.dir], origin: "human" },
+          () =>
+            s.rules.create({
+              id: String(body.id ?? ""),
+              title: String(body.title ?? ""),
+              body: String(body.body ?? ""),
+              ...(body.enabled === undefined ? {} : { enabled: body.enabled === true }),
+              ...(body.scope === undefined ? {} : { scope: body.scope as never }),
+              ...(Array.isArray(body.tags) ? { tags: body.tags.filter((t): t is string => typeof t === "string") } : {}),
+            }),
+          { confirmed: body.confirm === true },
+        );
+        return result;
+      }
+      if (method === "POST" && id === "compose") {
+        const body = await readJson(req, maxBody);
+        return s.rules.compose({ workspace: typeof body.workspace === "string" ? body.workspace : undefined });
+      }
+      if (method === "POST" && id && action) {
+        const body = await readJson(req, maxBody);
+        if (action === "enable" || action === "disable") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "config.set", target: `rule:${id}`, paths: [s.rules.dir], origin: "human" },
+            () => s.rules.update(id, { enabled: action === "enable" }),
+            { confirmed: body.confirm === true },
+          );
+          return result;
+        }
+        if (action === "update") {
+          const { result } = await app.guarded(
+            "api",
+            { action: "config.set", target: `rule:${id}`, paths: [s.rules.dir], origin: "human" },
+            () => s.rules.update(id, body as never),
+            { confirmed: body.confirm === true },
+          );
+          return result;
+        }
+      }
+      if (method === "DELETE" && id) {
+        const { result } = await app.guarded(
+          "api",
+          { action: "config.set", target: `rule:${id}`, paths: [s.rules.dir], origin: "human" },
+          async () => {
+            await s.rules.remove(id);
+            return { removed: id };
+          },
+          { confirmed: true },
+        );
+        return result;
+      }
+    }
+
+    if (resource === "skills") {
+      if (method === "GET" && !id) return s.skills.list();
+      if (method === "GET" && id === "scan") {
+        const roots = url.searchParams.getAll("root");
+        if (roots.length === 0) throw purgeError("invalid_argument", "at least one root query param is required");
+        return s.skills.scan(roots);
+      }
+      if (method === "POST" && id === "import") {
+        const body = await readJson(req, maxBody);
+        const sourceDir = String(body.path ?? "");
+        if (!sourceDir) throw purgeError("invalid_argument", "path is required");
+        const { result } = await app.guarded(
+          "api",
+          { action: "config.set", target: `skill:${sourceDir}`, paths: [s.skills.dir], origin: "human" },
+          () => s.skills.import(sourceDir, { overwrite: body.overwrite === true }),
+          { confirmed: body.confirm === true },
+        );
+        return result;
+      }
+      if (method === "POST" && id && action === "remove") {
+        const { result } = await app.guarded(
+          "api",
+          { action: "config.set", target: `skill:${id}`, paths: [s.skills.dir], origin: "human" },
+          () => s.skills.remove(id),
+          { confirmed: true },
+        );
+        return result;
+      }
+    }
+
     if (resource === "traces") {
       if (method === "GET" && !id) return s.traces.listTraces({ limit: 50 });
       if (method === "GET" && id) return s.traces.spansOf(id);
