@@ -18,11 +18,19 @@ import type { Logger } from "../core/logger.ts";
 
 export const PLUGIN_API_VERSION = "1";
 
+export type PluginPrivilege = "host" | "declared";
+
 export interface PluginManifest {
   name: string;
   version: string;
   apiVersion: string;
   entry: string;
+  /**
+   * 权限等级（必填，P1-04）：
+   * - "declared"：只通过 ctx.use() 访问能力（仍然与宿主同进程，不是沙箱）
+   * - "host"：明确承认拥有宿主同等权限，启用时必须显式 trust
+   */
+  privilege: PluginPrivilege;
   description?: string;
   /** 允许访问的宿主服务名（白名单）。 */
   capabilities: string[];
@@ -108,7 +116,7 @@ export class PluginHost {
         });
       } catch (err) {
         out.push({
-          manifest: { name: entry.name, version: "?", apiVersion: "?", entry: "", capabilities: [] },
+          manifest: { name: entry.name, version: "?", apiVersion: "?", entry: "", privilege: "declared", capabilities: [] },
           dir,
           state: "broken",
           hash: "",
@@ -153,8 +161,15 @@ export class PluginHost {
     return { manifest, dir: dest, state: "disabled", hash: installedHash, installedAt: new Date().toISOString() };
   }
 
-  async enable(name: string): Promise<InstalledPlugin> {
+  async enable(name: string, opts: { trusted?: boolean } = {}): Promise<InstalledPlugin> {
     const plugin = await this.#find(name);
+    // P1-04：host 特权插件必须显式信任；这不是沙箱，只是让用户明确知道后果。
+    if (plugin.manifest.privilege === "host" && opts.trusted !== true) {
+      throw purgeError("policy_denied", `plugin ${name} runs with host privileges and needs explicit trust`, {
+        privilege: plugin.manifest.privilege,
+        hint: "使用 --trust（CLI）或 confirm:true（API）确认你知道它会以宿主权限运行",
+      });
+    }
     const instance = await this.#load(plugin);
     const state = await this.#state();
     const record = state.plugins.find((p) => p.name === name);
@@ -188,7 +203,7 @@ export class PluginHost {
     return { ...plugin, state: "disabled" };
   }
 
-  async health(name: string): Promise<{ ok: boolean; state: PluginState; detail?: string }> {
+  async health(name: string, opts: { timeoutMs?: number } = {}): Promise<{ ok: boolean; state: PluginState; detail?: string }> {
     const plugin = await this.#find(name);
     if (plugin.state !== "enabled") return { ok: false, state: plugin.state, detail: "插件未启用" };
     const instance = this.#instances.get(name);
@@ -202,15 +217,15 @@ export class PluginHost {
     const inst = this.#instances.get(name);
     if (!inst?.health) return { ok: true, state: "enabled", detail: "未实现 health()，视为已加载" };
     try {
-      const r = await inst.health();
+      const r = await withPluginTimeout(Promise.resolve(inst.health()), opts.timeoutMs ?? 5000, `health of ${name}`);
       return { ok: r.ok, state: r.ok ? "enabled" : "broken", detail: r.detail };
     } catch (err) {
       return { ok: false, state: "broken", detail: asPurgeError(err).message };
     }
   }
 
-  /** 调用插件方法（受启用状态约束）。 */
-  async invoke(name: string, method: string, args: unknown): Promise<unknown> {
+  /** 调用插件方法（受启用状态约束；默认 5s 超时，P1-04）。 */
+  async invoke(name: string, method: string, args: unknown, opts: { timeoutMs?: number } = {}): Promise<unknown> {
     const plugin = await this.#find(name);
     if (plugin.state !== "enabled") throw purgeError("conflict", `plugin is not enabled: ${name}`, { state: plugin.state });
     let instance = this.#instances.get(name);
@@ -219,7 +234,7 @@ export class PluginHost {
       this.#instances.set(name, instance);
     }
     if (!instance.invoke) throw purgeError("unsupported", `plugin ${name} does not export invoke()`);
-    return instance.invoke(method, args);
+    return withPluginTimeout(Promise.resolve(instance.invoke(method, args)), opts.timeoutMs ?? 5000, `invoke ${name}.${method}`);
   }
 
   async remove(name: string): Promise<{ removed: string }> {
@@ -301,6 +316,9 @@ export class PluginHost {
     if (m.apiVersion !== PLUGIN_API_VERSION) problems.push(`apiVersion must be "${PLUGIN_API_VERSION}"`);
     if (!m.entry || m.entry.includes("..") || path.isAbsolute(m.entry)) problems.push("entry must be a relative path");
     if (!Array.isArray(m.capabilities)) problems.push("capabilities must be an array");
+    if (m.privilege !== "host" && m.privilege !== "declared") {
+      problems.push('privilege must be "host" or "declared"（运行在宿主进程内，无法提供沙箱）');
+    }
     if (problems.length > 0) {
       throw purgeError("schema_invalid", `invalid plugin manifest: ${problems.join("; ")}`, { file, problems });
     }
@@ -309,6 +327,7 @@ export class PluginHost {
       version: m.version as string,
       apiVersion: m.apiVersion as string,
       entry: m.entry as string,
+      privilege: m.privilege as PluginPrivilege,
       description: m.description,
       capabilities: m.capabilities as string[],
       permissions: m.permissions ?? [],
@@ -354,6 +373,19 @@ export class PluginHost {
     };
     await walk(dir, "");
     return hash.digest("hex");
+  }
+}
+
+/** 插件调用超时：插件代码是任意代码，不能让它无限阻塞调用方。 */
+async function withPluginTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(purgeError("timeout", `${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

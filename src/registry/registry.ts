@@ -30,6 +30,8 @@ export class HostRegistry {
   #candidates: HostCandidate[] = [];
   #discoveredAt = 0;
   #facts = new Map<string, CachedFacts>();
+  /** 单飞：并发 discover 共用同一次扫描（P3-05）。 */
+  #discovering: Promise<HostCandidate[]> | null = null;
 
   constructor(opts: RegistryOptions) {
     this.#logger = opts.logger;
@@ -58,6 +60,14 @@ export class HostRegistry {
     if (!force && this.#candidates.length > 0 && Date.now() - this.#discoveredAt < this.#ttl) {
       return this.#candidates;
     }
+    if (this.#discovering) return this.#discovering;
+    this.#discovering = this.#doDiscover().finally(() => {
+      this.#discovering = null;
+    });
+    return this.#discovering;
+  }
+
+  async #doDiscover(): Promise<HostCandidate[]> {
     const all: HostCandidate[] = [];
     const errors: Array<{ adapter: string; error: string }> = [];
     for (const adapter of this.#adapters) {

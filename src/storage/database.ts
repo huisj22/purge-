@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { ensureDir } from "../core/atomic.ts";
 import { purgeError } from "../core/errors.ts";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const MIGRATIONS: Array<{ version: number; apply: (db: DatabaseSync) => void }> = [
   {
@@ -122,6 +122,16 @@ const MIGRATIONS: Array<{ version: number; apply: (db: DatabaseSync) => void }> 
         );
         CREATE INDEX IF NOT EXISTS idx_log_ts ON log(ts);
         CREATE INDEX IF NOT EXISTS idx_log_level ON log(level);
+      `);
+    },
+  },
+  {
+    version: 4,
+    apply: (db) => {
+      // P3-09：日志与 trace 关联
+      db.exec(`
+        ALTER TABLE log ADD COLUMN trace_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_log_trace ON log(trace_id);
       `);
     },
   },

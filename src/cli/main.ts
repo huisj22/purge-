@@ -47,7 +47,7 @@ const HELP = `Purge+ ${APP_VERSION}
   host list                       发现宿主
   host inspect <hostId>           只读取证（磁盘态/进程态/加载态）
   diagnose [<hostId>] [--all]     运行诊断
-  snapshot list|capture <label> <paths...>|restore <id>|verify <id>
+  snapshot list|capture <label> <abs-path...>|restore <id>|verify <id>   （capture 的路径会被逐文件快照）
   pack list|import <file>|plan <id> <hostId>|apply <id> <hostId>|revert <snapshotId>
   rule list|add <id> <title> --body <text>|show <id>|on|off|rm <id>|compose [--workspace <dir>]
   skill list|scan <root>|add <dir> [--overwrite]|rm <name>
@@ -445,7 +445,7 @@ async function main(argv: string[]): Promise<number> {
           return EXIT.ok;
         }
         if (sub === "enable" && rest[0]) {
-          const { result } = await app.guarded("cli", { action: "plugin.enable", target: rest[0], origin: "human" }, () => s.plugins.enable(rest[0] as string), { confirmed: flags.yes });
+          const { result } = await app.guarded("cli", { action: "plugin.enable", target: rest[0], origin: "human" }, () => s.plugins.enable(rest[0] as string, { trusted: flags.yes }), { confirmed: flags.yes, forceConfirm: true });
           out(result, `${result.manifest.name} → ${result.state}`);
           return EXIT.ok;
         }

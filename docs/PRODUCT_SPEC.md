@@ -53,7 +53,7 @@
 | 9 | Observability | trace/时间线/指标/失败分析 | 数据来自真实执行 |
 | 10 | Recovery Center | 快照/回滚/完整性校验 | 回滚必须回读验证 |
 | 11 | Security Center | 风险评分、策略、审计链 | AI 不能绕过确定性策略 |
-| 12 | Plugin System | 安装/启停/权限/健康 | 越权即拒绝 |
+| 12 | Plugin System | 安装/启停/能力声明/信任门/健康/超时 | 越权 `ctx.use` 即拒绝；**非沙箱**（宿主权限运行） |
 
 辅以：Update & Maintenance Center（第 13）、AI Assistant（第 14，仅建议+证据分级）、UI/CLI（第 15）。
 

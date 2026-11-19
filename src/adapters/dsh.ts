@@ -43,6 +43,8 @@ export interface DshAdapterOptions {
   includeDefaults?: boolean;
   /** 关闭进程探测（测试用）。 */
   skipProcessProbe?: boolean;
+  /** 修改标记扫描的文件数上限（默认 400）。 */
+  markerScanLimit?: number;
 }
 
 export class DshHostAdapter implements HostAdapter {
@@ -338,27 +340,27 @@ export class DshHostAdapter implements HostAdapter {
 
     const markerHits: ModificationFootprint["markerHits"] = [];
     let scannedFiles = 0;
+    let scanTruncated = false;
     if (unpacked.exists) {
-      const scan = await this.#scanMarkers(path.join(resources, "app"), MARKER_SAMPLE_LIMIT);
+      const scan = await this.#scanMarkers(path.join(resources, "app"), this.#opts.markerScanLimit ?? MARKER_SAMPLE_LIMIT);
       markerHits.push(...scan.hits);
       scannedFiles = scan.scanned;
+      scanTruncated = scan.truncated;
     }
-    // 宿主源码 mtime 晚于归档 → 磁盘被改过（推断级证据）
-    let looksModified: boolean | null = null;
-    if (unpacked.exists) {
-      const appPkg = path.join(resources, "app", "package.json");
-      const st = await fsp.stat(appPkg).catch(() => null);
-      if (st) {
-        const newer = archive.mtimeMs !== undefined ? st.mtimeMs > archive.mtimeMs : null;
-        looksModified = markerHits.length > 0 ? true : newer;
-      }
-    } else if (archive.exists) {
-      looksModified = false; // 只有归档 = 未解包，源码未被就地修改
-    }
-    return { packs, markerHits, scannedFiles, looksModified };
+    // 判定原则（P1-02 修复）：
+    //  - 只有「存在修改标记」或「有修改包记录」才算被修改（确定证据）；
+    //  - mtime 只作为提示字段输出，不参与判定：解包本身必然让 app/ 比 asar 新；
+    //  - 扫描被截断且没有命中 → 无法证明未修改，只能 null（unknown）。
+    let looksModified: boolean | null;
+    if (markerHits.length > 0 || packs.length > 0) looksModified = true;
+    else if (!unpacked.exists) looksModified = false; // 只有归档 = 未就地修改
+    else looksModified = scanTruncated ? null : false;
+    const appPkgStat = await fsp.stat(path.join(resources, "app", "package.json")).catch(() => null);
+    const mtimeNewerThanArchive = appPkgStat && archive.mtimeMs !== undefined ? appPkgStat.mtimeMs > archive.mtimeMs : null;
+    return { packs, markerHits, scannedFiles, scanTruncated, mtimeNewerThanArchive, looksModified };
   }
 
-  async #scanMarkers(root: string, limit: number): Promise<{ hits: Array<{ file: string; markers: string[] }>; scanned: number }> {
+  async #scanMarkers(root: string, limit: number): Promise<{ hits: Array<{ file: string; markers: string[] }>; scanned: number; truncated: boolean }> {
     const hits: Array<{ file: string; markers: string[] }> = [];
     const queue: string[] = [root];
     let visited = 0;
@@ -400,7 +402,9 @@ export class DshHostAdapter implements HostAdapter {
         }
       }
     }
-    return { hits, scanned: visited };
+    // 只要触到上限，就无法证明"全扫过"——一律标记不完整（保守但诚实）
+    const truncated = visited >= limit;
+    return { hits, scanned: visited, truncated };
   }
 }
 

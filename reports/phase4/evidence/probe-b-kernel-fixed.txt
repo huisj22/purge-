@@ -1,0 +1,10 @@
+﻿{
+  "firstError": "service \"flaky\" failed to start: first start fails",
+  "secondError": "",
+  "secondSucceeded": true,
+  "startAttempts": 2,
+  "kernelStarted": true,
+  "note": "服务第二次应当被真正调用一次（attempts 变 2）；若仍为 1 且抛同一错误，说明 start() 被永久锁死"
+}
+
+PROBE_RESULT=retry-works

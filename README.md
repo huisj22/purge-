@@ -112,7 +112,7 @@ adapters(dsh/asar) · storage(sqlite)                     ← 适配层
 ## 开发
 
 ```bash
-node --test "tests/**/*.test.ts"   # 当前 150 项，全绿
+node --test "tests/**/*.test.ts"   # 当前 197 项，全绿（含 29 项故障注入）
 pnpm i && npx tsc --noEmit        # 类型检查（已通过，0 错误）
 node scripts/acceptance.ts      # 端到端验收（临时目录造假宿主，14 项断言）
 ```

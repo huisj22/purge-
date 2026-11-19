@@ -203,6 +203,9 @@ export class PurgeApp {
       bus: this.bus,
     };
     servicesRef.value = services;
+    // P3-08：修复上次进程崩溃遗留的 running 状态
+    const recovered = workflow.recoverInterrupted();
+    if (recovered.runs > 0) this.logger.warn("interrupted runs marked at startup", recovered);
     this.#services = services;
     if (this.#opts.startScheduler !== false) scheduler.start();
     this.#started = true;

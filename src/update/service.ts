@@ -69,6 +69,8 @@ export interface UpdateServiceOptions {
   /** 可注入的抓取器（测试用）。默认支持 file:// 与 http(s)。 */
   fetcher?: (source: string) => Promise<Buffer>;
   channel?: string;
+  /** HTTP 抓取超时（默认 30s）。 */
+  fetchTimeoutMs?: number;
 }
 
 export class UpdateService {
@@ -115,7 +117,8 @@ export class UpdateService {
   }
 
   async plan(targetVersion?: string, opts: { index?: ReleaseIndex } = {}): Promise<UpdatePlan> {
-    const index = opts.index ?? (await this.loadIndex());
+    // 传入的 index 也必须走同一套校验，不能因为"已经解析过"就跳过
+    const index = opts.index ? validateIndex(opts.index, "provided-index") : await this.loadIndex();
     const version = targetVersion ?? (await this.check({ index })).latest;
     if (!version) throw purgeError("not_found", "no version available to install");
     const release = index.releases.find((r) => r.version === version);
@@ -160,10 +163,16 @@ export class UpdateService {
   }
 
   /** 把 staging 提升为活跃版本；返回新的指针内容。 */
-  async activate(staged: StagedResult): Promise<{ version: string; dir: string; previous?: string }> {
+  async activate(staged: StagedResult): Promise<{ version: string; dir: string; previous?: string; backupDir?: string }> {
     const targetDir = path.join(this.dir, "versions", staged.version);
     await ensureDir(path.dirname(targetDir));
-    await removeTreeNoFollow(targetDir);
+    let backupDir: string | undefined;
+    const targetExists = await fsp.stat(targetDir).then((s) => s.isDirectory()).catch(() => false);
+    if (targetExists) {
+      // P2-07：同版本重复激活不再直接删除旧目录，改为留一份备份
+      backupDir = path.join(this.dir, "versions", `.backup-${staged.version}-${Date.now().toString(36)}`);
+      await fsp.rename(targetDir, backupDir);
+    }
     await fsp.rename(staged.stagingDir, targetDir);
     const state = await this.#readState();
     const previous = state.activeVersion;
@@ -173,7 +182,22 @@ export class UpdateService {
     if (!files.includes("manifest.json")) {
       throw purgeError("integrity_failed", "activated directory is missing its manifest");
     }
-    return { version: staged.version, dir: targetDir, previous };
+    return { version: staged.version, dir: targetDir, previous, ...(backupDir ? { backupDir } : {}) };
+  }
+
+  /** 清理旧版本目录，只保留最近 keep 个（P3-10）。备份目录不清理。 */
+  async prune(keep = 3): Promise<{ removed: string[]; kept: string[] }> {
+    const versionsDir = path.join(this.dir, "versions");
+    const entries = await fsp.readdir(versionsDir).catch(() => [] as string[]);
+    const state = await this.#readState();
+    const candidates = entries.filter((e) => !e.startsWith(".") && e !== state.activeVersion).sort((a, b) => compareVersions(b, a));
+    const removable = candidates.slice(Math.max(0, keep - 1));
+    const removed: string[] = [];
+    for (const e of removable) {
+      await removeTreeNoFollow(path.join(versionsDir, e));
+      removed.push(e);
+    }
+    return { removed, kept: entries.filter((e) => !removed.includes(e)) };
   }
 
   async status(): Promise<{ activeVersion?: string; activeDir?: string; lastCheck?: UpdateCheck }> {
@@ -188,9 +212,21 @@ export class UpdateService {
   async #fetch(source: string): Promise<Buffer> {
     if (this.#o.fetcher) return this.#o.fetcher(source);
     if (source.startsWith("http://") || source.startsWith("https://")) {
-      const res = await fetch(source);
-      if (!res.ok) throw purgeError("unreadable", `download failed: HTTP ${res.status} for ${source}`);
-      return Buffer.from(await res.arrayBuffer());
+      const timeoutMs = this.#o.fetchTimeoutMs ?? 30_000;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(source, { signal: controller.signal });
+        if (!res.ok) throw purgeError("unreadable", `download failed: HTTP ${res.status} for ${source}`);
+        return Buffer.from(await res.arrayBuffer());
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          throw purgeError("timeout", `download timed out after ${timeoutMs}ms: ${source}`);
+        }
+        throw asPurgeError(err);
+      } finally {
+        clearTimeout(timer);
+      }
     }
     const file = source.startsWith("file://") ? new URL(source) : source;
     try {
@@ -223,6 +259,9 @@ export function validateIndex(raw: unknown, source: string): ReleaseIndex {
       if (!a.name || a.name.includes("/") || a.name.includes("..")) problems.push(`releases[${i}].artifacts[${j}].name must be a plain file name`);
       if (!a.sha256 || !/^[a-f0-9]{64}$/i.test(a.sha256)) problems.push(`releases[${i}].artifacts[${j}].sha256 must be 64 hex chars`);
       if (!a.source) problems.push(`releases[${i}].artifacts[${j}].source is required`);
+      else if (!/^(https?:\/\/|file:\/\/)/.test(a.source) && !path.isAbsolute(a.source)) {
+        problems.push(`releases[${i}].artifacts[${j}].source must be http(s)://, file:// or an absolute path`);
+      }
     }
   }
   if (problems.length > 0) {

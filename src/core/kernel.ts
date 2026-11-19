@@ -89,6 +89,8 @@ export class Kernel {
           for (const done of startedIds.reverse()) {
             await this.#safeStop(done);
           }
+          // 关键：失败后清空缓存的 Promise，否则后续 start() 会永远重放同一个 rejection。
+          this.#startPromise = null;
           throw new PurgeError({
             code: "service_failed",
             message: `service "${id}" failed to start: ${e.message}`,
@@ -100,7 +102,11 @@ export class Kernel {
       this.bus.emit("kernel.started", { services: startedIds });
       this.logger.info("kernel started", { services: startedIds.length });
     })();
-    return this.#startPromise;
+    // 失败时不要把 rejected Promise 留在字段里（上面已置空，这里兜底一次）
+    this.#startPromise?.catch(() => {
+      this.#startPromise = null;
+    });
+    return this.#startPromise as Promise<void>;
   }
 
   async stop(): Promise<void> {

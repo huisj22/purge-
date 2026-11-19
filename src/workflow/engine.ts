@@ -17,7 +17,7 @@ import type { Database } from "../storage/database.ts";
 import type { TraceStore } from "../storage/trace.ts";
 
 export type StepState = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled" | "timeout" | "interrupted";
-export type RunState = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "partial";
+export type RunState = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "partial" | "interrupted";
 
 export interface StepDef {
   id: string;
@@ -81,6 +81,10 @@ export class WorkflowEngine {
   readonly #o: EngineOptions;
   readonly #workflows = new Map<string, WorkflowDef>();
   readonly #cancelled = new Set<string>();
+  /** runId → 该 run 下所有进行中步骤的 AbortController（取消时统一 abort）。 */
+  readonly #controllers = new Map<string, Set<AbortController>>();
+  /** 正在进行中的 runId（防止同一 run 被并发 resume）。 */
+  readonly #activeRuns = new Set<string>();
 
   constructor(opts: EngineOptions) {
     this.#o = opts;
@@ -113,11 +117,25 @@ export class WorkflowEngine {
 
   cancel(runId: string): void {
     this.#cancelled.add(runId);
+    // P2-04 修复：取消必须中断执行器，而不是等它自己跑完。
+    for (const controller of this.#controllers.get(runId) ?? []) {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.#o.logger.info("workflow cancel requested", { runId });
   }
 
   async run(workflowId: string, opts: { resumeRunId?: string } = {}): Promise<RunRecord> {
     const def = this.get(workflowId);
     const runId = opts.resumeRunId ?? `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+    if (this.#activeRuns.has(runId)) {
+      throw purgeError("conflict", `run is already active: ${runId}`, { hint: "同一 run 不能并发执行/恢复" });
+    }
+    this.#activeRuns.add(runId);
+    try {
     const resume = opts.resumeRunId ? this.getRun(opts.resumeRunId) : null;
     if (opts.resumeRunId && !resume) throw purgeError("not_found", `run not found: ${opts.resumeRunId}`);
     const startedMs = resume?.startedMs ?? Date.now();
@@ -214,8 +232,36 @@ export class WorkflowEngine {
     span.end(runState === "succeeded" ? "ok" : runState === "cancelled" ? "cancelled" : "error", { runState });
     this.#o.bus.emit(EVENTS.runStateChanged, { runId, workflowId: def.id, state: runState });
     this.#o.logger.info("workflow finished", { runId, workflowId: def.id, state: runState });
-    this.#cancelled.delete(runId);
     return this.getRun(runId) as RunRecord;
+    } finally {
+      // 无论成功、失败还是抛错，都必须释放 run 级状态，否则该 run 永远无法再次 resume
+      this.#cancelled.delete(runId);
+      this.#controllers.delete(runId);
+      this.#activeRuns.delete(runId);
+    }
+  }
+
+  /**
+   * 启动时修复遗留状态（P3-08）：把上次进程崩溃时残留的 running 步骤标记为 interrupted，
+   * 对应 run 标记为 interrupted，避免 getRun 永远显示"正在运行"。
+   */
+  recoverInterrupted(): { runs: number; steps: number } {
+    const runningRuns = this.#o.db.raw
+      .prepare("SELECT run_id FROM run WHERE kind='workflow' AND state='running'")
+      .all() as unknown as Array<{ run_id: string }>;
+    let steps = 0;
+    for (const row of runningRuns) {
+      if (this.#activeRuns.has(row.run_id)) continue;
+      const res = this.#o.db.raw
+        .prepare("UPDATE run_step SET state='interrupted' WHERE run_id=? AND state='running'")
+        .run(row.run_id);
+      steps += Number(res.changes ?? 0);
+      this.#o.db.raw.prepare("UPDATE run SET state='interrupted', ended_ms=? WHERE run_id=?").run(Date.now(), row.run_id);
+    }
+    if (runningRuns.length > 0) {
+      this.#o.logger.warn("recovered interrupted runs", { runs: runningRuns.length, steps });
+    }
+    return { runs: runningRuns.length, steps };
   }
 
   async #executeStep(
@@ -240,6 +286,10 @@ export class WorkflowEngine {
       rec.attempts = attempt;
       rec.startedMs = rec.startedMs ?? Date.now();
       const controller = new AbortController();
+      // 注册到 run 级控制器集合，cancel() 才能中断它（P2-04）
+      const set = this.#controllers.get(runId) ?? new Set<AbortController>();
+      set.add(controller);
+      this.#controllers.set(runId, set);
       const ctx: StepContext = {
         runId,
         workflowId: def.id,
@@ -250,7 +300,26 @@ export class WorkflowEngine {
       };
       try {
         const timeoutMs = step.timeoutMs ?? 30_000;
-        const output = await withTimeout(executor(step.with ?? {}, ctx), timeoutMs, controller, () => this.#cancelled.has(runId));
+        // 取消竞速：即使执行器忽略 signal，我们也不再等它（后台 Promise 会被丢弃，副作用无法回收，
+        // 这点在报告中明确说明；但至少 run 不会挂住）。
+        const abortRace = new Promise<never>((_, reject) => {
+          if (controller.signal.aborted) {
+            reject(purgeError("timeout", "cancelled"));
+            return;
+          }
+          controller.signal.addEventListener("abort", () => reject(purgeError("timeout", "cancelled")), { once: true });
+        });
+        const output = await Promise.race([
+          withTimeout(executor(step.with ?? {}, ctx), timeoutMs, controller, () => this.#cancelled.has(runId)),
+          abortRace,
+        ]);
+        if (this.#cancelled.has(runId)) {
+          // 执行器可能忽略了 abort 仍然返回；此时不能把它记成成功
+          rec.state = "cancelled";
+          rec.endedMs = Date.now();
+          span.end("cancelled", { attempts: attempt, ignoredAbort: true });
+          return { state: "cancelled" };
+        }
         rec.state = "succeeded";
         rec.output = output;
         rec.error = undefined;
@@ -261,6 +330,11 @@ export class WorkflowEngine {
         const e = asPurgeError(err);
         rec.error = e.message;
         rec.endedMs = Date.now();
+        if (this.#cancelled.has(runId)) {
+          rec.state = "cancelled";
+          span.end("cancelled", { attempts: attempt });
+          return { state: "cancelled" };
+        }
         if (e.code === "timeout") {
           rec.state = "timeout";
           span.end("error", { reason: "timeout" });

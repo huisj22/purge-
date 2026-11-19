@@ -74,7 +74,7 @@ export async function atomicWriteFile(file: string, data: Buffer | string, opts:
     }
   } catch (err) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
-    throw new PurgeFsError(file, "unwritable", err);
+    throw purgeError("unwritable", `cannot write ${file}: ${(err as Error).message}`, { file });
   }
 }
 
@@ -164,7 +164,12 @@ export async function removeTreeNoFollow(target: string): Promise<void> {
     if (entry.isDirectory()) await removeTreeNoFollow(child);
     else await fsp.rm(child, { force: true });
   }
-  await fsp.rmdir(target).catch(() => {});
+  try {
+    await fsp.rmdir(target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw new PurgeFsError(target, "unwritable", err);
+  }
 }
 
 /** 列出目录树（相对路径 + 尺寸 + 哈希），用于快照与一致性校验。 */

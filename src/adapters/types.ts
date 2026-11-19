@@ -82,6 +82,10 @@ export interface ModificationFootprint {
   markerHits: Array<{ file: string; markers: string[] }>;
   /** 抽样扫描了多少个源码文件；用于判断结论强度。 */
   scannedFiles?: number;
+  /** 扫描是否因上限被截断（截断时不能给出"未修改"的结论）。 */
+  scanTruncated?: boolean;
+  /** 仅作提示：app/package.json 的 mtime 是否晚于归档（不参与判定）。 */
+  mtimeNewerThanArchive?: boolean | null;
   /** 无法判断时为 null，不允许默认「没改过」。 */
   looksModified: boolean | null;
 }

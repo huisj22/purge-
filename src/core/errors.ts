@@ -16,6 +16,7 @@ export type ErrorCode =
   | "integrity_failed"
   | "timeout"
   | "unsupported"
+  | "unsupported_media_type"
   | "internal";
 
 export interface PurgeErrorOptions {

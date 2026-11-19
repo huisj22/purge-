@@ -136,7 +136,8 @@ describe("scheduler", () => {
     await s.tick();
     await new Promise((r) => setTimeout(r, 10));
     const job = s.get("bad");
-    assert.equal(job.state, "failed");
+    // P2-03：一次失败不应让任务永久停摆 —— 保持 enabled，错误与次数可查
+    assert.equal(job.state, "enabled");
     assert.equal(job.lastError, "boom");
     assert.equal(job.attempts, 1);
     db.close();

@@ -250,7 +250,8 @@ describe("http api", () => {
     });
 
     const composedIn = await api<{ included: string[]; text: string }>(base, "POST", "/api/rules/compose", { workspace: path.join(ws, "sub") });
-    assert.deepEqual(composedIn.json.data?.included, ["proj", "style"]);
+    // 文档契约：全局规则在前、工作区规则在后（组内按 id）
+    assert.deepEqual(composedIn.json.data?.included, ["style", "proj"]);
     assert.match(composedIn.json.data?.text ?? "", /只用 ESM/);
 
     const composedOut = await api<{ included: string[] }>(base, "POST", "/api/rules/compose", { workspace: path.join(tmp, "elsewhere") });

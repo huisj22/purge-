@@ -37,6 +37,8 @@ export interface LogRecord {
   level: LogLevel;
   msg: string;
   ctx?: unknown;
+  /** 与 trace 关联（bindings.traceId 自动带出）。 */
+  traceId?: string;
 }
 
 export interface Logger {
@@ -70,6 +72,8 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
       ? undefined
       : { ...(bindings ?? {}), ...(ctx && typeof ctx === "object" ? (ctx as object) : ctx === undefined ? {} : { value: ctx }) };
     const rec: LogRecord = { ts: new Date().toISOString(), level: lvl, msg };
+    const boundTraceId = bindings?.traceId;
+    if (typeof boundTraceId === "string" && boundTraceId.length > 0) rec.traceId = boundTraceId;
     if (payload !== undefined) rec.ctx = redact(payload);
     records.push(rec);
     if (records.length > maxRecords) records.shift();

@@ -21,6 +21,7 @@ export interface LogRow {
 export interface LogQuery {
   level?: LogLevel;
   contains?: string;
+  traceId?: string;
   sinceMs?: number;
   limit?: number;
 }
@@ -30,6 +31,9 @@ export class LogStore {
   readonly #max: number;
   #pruned = 0;
   #writeErrors = 0;
+  /** 当前行数（内存计数，避免每次 append 都全表 COUNT）。 */
+  #count = 0;
+  #countLoaded = false;
 
   constructor(db: Database, opts: { maxRows?: number } = {}) {
     this.#db = db;
@@ -39,15 +43,21 @@ export class LogStore {
   append(record: LogRecord): void {
     try {
       this.#db.raw
-        .prepare("INSERT INTO log(ts,level,msg,ctx) VALUES(?,?,?,?)")
-        .run(record.ts, record.level, record.msg, record.ctx === undefined ? null : JSON.stringify(record.ctx));
-      const row = this.#db.raw.prepare("SELECT COUNT(*) AS n FROM log").get() as { n: number };
-      const total = Number(row.n);
-      if (total > this.#max) {
-        const excess = total - this.#max;
+        .prepare("INSERT INTO log(ts,level,msg,ctx,trace_id) VALUES(?,?,?,?,?)")
+        .run(record.ts, record.level, record.msg, record.ctx === undefined ? null : JSON.stringify(record.ctx), record.traceId ?? null);
+      if (!this.#countLoaded) {
+        const row = this.#db.raw.prepare("SELECT COUNT(*) AS n FROM log").get() as { n: number };
+        this.#count = Number(row.n);
+        this.#countLoaded = true;
+      } else {
+        this.#count += 1;
+      }
+      if (this.#count > this.#max) {
+        const excess = this.#count - this.#max;
         this.#db.raw
           .prepare("DELETE FROM log WHERE id IN (SELECT id FROM log ORDER BY id ASC LIMIT ?)")
           .run(excess);
+        this.#count -= excess;
         this.#pruned += excess;
       }
     } catch {
@@ -66,6 +76,10 @@ export class LogStore {
     if (opts.contains) {
       clauses.push("(msg LIKE ? OR ctx LIKE ?)");
       params.push(`%${opts.contains}%`, `%${opts.contains}%`);
+    }
+    if (opts.traceId) {
+      clauses.push("trace_id = ?");
+      params.push(opts.traceId);
     }
     if (opts.sinceMs !== undefined) {
       clauses.push("ts >= ?");

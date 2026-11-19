@@ -119,7 +119,7 @@ export class Scheduler {
   /** 立即执行一次（不影响 schedule 的下次触发时间）。 */
   async runNow(id: string): Promise<{ ok: boolean; error?: string }> {
     const job = this.get(id);
-    return this.#execute(job, this.#now());
+    return this.#execute(job, this.#now(), { advanceSchedule: false });
   }
 
   start(): void {
@@ -157,8 +157,9 @@ export class Scheduler {
     return started;
   }
 
-  async #execute(job: JobSpec, now: number): Promise<{ ok: boolean; error?: string }> {
-    const next = computeNext(job.schedule, now);
+  async #execute(job: JobSpec, now: number, opts: { advanceSchedule?: boolean } = {}): Promise<{ ok: boolean; error?: string }> {
+    const advance = opts.advanceSchedule !== false;
+    const next = advance ? computeNext(job.schedule, now) : job.nextRunMs;
     try {
       await this.#o.runJob(job);
       job.attempts += 1;
@@ -175,9 +176,11 @@ export class Scheduler {
       job.lastRunMs = now;
       job.nextRunMs = next;
       job.lastError = e.message;
-      job.state = "failed";
+      // P2-03 修复：一次失败不能让任务永久停摆。
+      // 保持 enabled 并按计划继续；失败次数与错误留在 attempts/lastError 里供观察。
+      job.state = "enabled";
       this.#persist(job);
-      this.#o.logger.warn("job failed", { id: job.id, error: e.message });
+      this.#o.logger.warn("job failed", { id: job.id, error: e.message, attempts: job.attempts });
       return { ok: false, error: e.message };
     }
   }

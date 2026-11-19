@@ -1,0 +1,20 @@
+﻿{
+  "shape": "both",
+  "markerHits": 0,
+  "packs": 0,
+  "looksModified": false,
+  "verdict": "pass",
+  "verdictText": "未发现宿主源码被就地修改的迹象",
+  "severity": "high",
+  "allRuleStatuses": [
+    "identity.verified=pass",
+    "layout.archive_readable=pass",
+    "layout.dual_shape=warn",
+    "layout.runtime_present=warn",
+    "process.probe=unknown",
+    "profile.bundle_declared=pass",
+    "modification.traceable=pass"
+  ]
+}
+
+PROBE_RESULT=no-false-positive

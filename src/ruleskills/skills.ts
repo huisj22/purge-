@@ -191,6 +191,7 @@ export class SkillLibrary {
 
   async #walk(root: string, warnings: SkillWarning[]): Promise<Array<{ rel: string; size: number; hash: string }>> {
     const out: Array<{ rel: string; size: number; hash: string }> = [];
+    let totalBytes = 0;
     const walk = async (dir: string, rel: string): Promise<void> => {
       const entries = await fsp.readdir(dir, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -214,10 +215,11 @@ export class SkillLibrary {
           warnings.push({ code: "executable_content", message: `含可执行脚本，运行前请审阅`, path: relPath });
         }
         out.push({ rel: relPath, size: st.size, hash: await sha256File(abs) });
+        totalBytes += st.size;
         if (out.length > this.#o.maxFiles) {
           throw purgeError("invalid_argument", `too many files in skill (>${this.#o.maxFiles})`);
         }
-        if (out.reduce((n, f) => n + f.size, 0) > this.#o.maxTotalBytes) {
+        if (totalBytes > this.#o.maxTotalBytes) {
           throw purgeError("invalid_argument", `skill exceeds total size limit (${this.#o.maxTotalBytes})`);
         }
       }

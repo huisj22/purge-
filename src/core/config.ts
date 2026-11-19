@@ -16,6 +16,8 @@ export const CONFIG_SCHEMA: Schema = {
   port: { kind: "number", optional: true, default: 7801, min: 1, max: 65535, integer: true },
   host: { kind: "string", optional: true, default: "127.0.0.1" },
   logLevel: { kind: "string", optional: true, default: "info", enum: ["debug", "info", "warn", "error"] },
+  /** API 访问令牌；为空表示未启用鉴权（此时只允许绑定回环地址）。 */
+  apiToken: { kind: "string", optional: true, default: "", maxLength: 512 },
   hosts: {
     kind: "object",
     optional: true,
@@ -62,6 +64,7 @@ export interface PurgeConfig {
   port: number;
   host: string;
   logLevel: "debug" | "info" | "warn" | "error";
+  apiToken: string;
   hosts: { roots: string[] };
   policy: { confirmThreshold: number; denyThreshold: number; allowActions: string[] };
   scheduler: { maxConcurrent: number; tickMs: number };
@@ -105,15 +108,21 @@ export class ConfigStore {
   /** 变更配置；patch 为深合并的对象。校验失败抛 schema_invalid，不落盘。 */
   async update(patch: Record<string, unknown>): Promise<PurgeConfig> {
     const base = this.#current ?? (await this.load());
-    const beforeRaw = JSON.stringify(this.#raw);
     const merged = deepMerge(this.#raw, patch);
-    const next = this.#apply(merged, true);
-    const rawChanged = JSON.stringify(this.#raw) !== beforeRaw;
-    if (!rawChanged) return next;
-    const diff = diffConfig(base, next);
-    await atomicWriteFile(this.file, `${JSON.stringify(this.#raw, null, 2)}\n`);
-    await this.#appendHistory(next, diff);
-    return next;
+    // 1) 先纯校验（不改变任何状态）
+    const validated = validateSchema<PurgeConfig>(CONFIG_SCHEMA, merged);
+    if (!validated.ok) {
+      throw purgeError("schema_invalid", "config validation failed", { issues: validated.issues, file: this.file });
+    }
+    if (JSON.stringify(merged) === JSON.stringify(this.#raw)) return validated.value;
+    // 2) 再落盘；失败则内存态保持原样（P2-01）
+    await atomicWriteFile(this.file, `${JSON.stringify(merged, null, 2)}\n`);
+    // 3) 落盘成功后才切换内存态
+    this.#raw = { ...merged };
+    this.#current = validated.value;
+    const diff = diffConfig(base, validated.value);
+    await this.#appendHistory(validated.value, diff);
+    return validated.value;
   }
 
   get(): PurgeConfig {

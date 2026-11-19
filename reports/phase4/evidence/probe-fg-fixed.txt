@@ -1,0 +1,17 @@
+﻿{
+  "probe": "F2-scheduler-failure-retry",
+  "calls": 6,
+  "stateAfterFailure": "enabled",
+  "attemptsAfterTenPeriods": 6,
+  "expectation": "一次性瞬时失败不应让任务永久停摆；应保留调度并记录失败次数（或显式退避）"
+}
+F2_RESULT=still-scheduled
+{
+  "probe": "G-workflow-cancel",
+  "runState": "cancelled",
+  "stepState": "cancelled",
+  "executorActuallyFinished": true,
+  "msUntilRunReturned": 1207,
+  "expectation": "取消应尽快返回并阻止步骤完成后的副作用被计入成功"
+}
+G_RESULT=CANCEL_DOES_NOT_INTERRUPT

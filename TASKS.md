@@ -26,4 +26,12 @@
 | T-020 | 规则/技能中心 | P2 | done | T-013 | CRUD + 导入安全校验 | ruleskills tests |
 | T-021 | README 与安装说明 | P1 | done | T-015 | 新机器按文档可跑 | 人工验证 |
 | T-023 | 配置中心多目标 diff/冲突 | P1 | done | T-013 | 外部改动被拒绝 | configcenter tests |
-| T-022 | 端到端验收脚本 | P1 | done | T-015,T-016 | 一条命令跑完整链路 | e2e 脚本 |
+| T-022 | 端到端验收脚本 | P1 | done |
+| T-030 | Phase 4 独立审计（14 模块） | P0 | done | T-001..T-022 | 14 份审计 + 结论分类 | reports/phase4/audit |
+| T-031 | 故障注入（29 例） | P0 | done | T-030 | 全绿且保留 BLOCKED 说明 | tests/phase4-fault-injection.test.ts |
+| T-032 | 修复 P0/P1（5 项） | P0 | done | T-031 | 先失败测试后通过 | tests/phase4-regressions / phase4-security |
+| T-033 | 修复 P2/P3（27 项） | P1 | done | T-032 | 见 ISSUE_REGISTER | 同上 |
+| T-034 | 真实环境只读验证 | P1 | done | T-032 | 实机诊断/取证/doctor | reports/phase4/REAL_ENVIRONMENT_VALIDATION.md |
+| T-035 | 安装器 + CI | P0 | todo | T-033 | 新机器可装可升级 | 待建 |
+| T-036 | 子进程插件隔离 | P1 | todo | T-033 | 插件越权被 OS 限制 | 待建 |
+| T-037 | 跨进程维护锁 | P1 | todo | T-033 | 两实例并发写不互相覆盖 | 待建 |

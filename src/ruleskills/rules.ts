@@ -169,7 +169,12 @@ export class RuleStore {
    */
   async compose(opts: { workspace?: string } = {}): Promise<{ text: string; included: string[]; skipped: Array<{ id: string; reason: string }> }> {
     const workspace = opts.workspace ? path.resolve(opts.workspace) : undefined;
-    const rules = await this.list();
+    const rules = (await this.list()).sort((a, b) => {
+      // 全局规则永远排在工作区规则之前（文档承诺）
+      const ak = a.scope.kind === "global" ? 0 : 1;
+      const bk = b.scope.kind === "global" ? 0 : 1;
+      return ak === bk ? a.id.localeCompare(b.id) : ak - bk;
+    });
     const included: string[] = [];
     const skipped: Array<{ id: string; reason: string }> = [];
     const parts: string[] = [];

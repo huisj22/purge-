@@ -1,0 +1,16 @@
+﻿{
+  "restored": [
+    "a.txt"
+  ],
+  "failed": [
+    {
+      "file": "b.txt",
+      "error": "EEXIST: file already exists, mkdir 'C:\\Users\\chenw\\AppData\\Local\\Temp\\p4-probe-restore-ai0sg3\\b-dir'"
+    }
+  ],
+  "aAfter": "A1",
+  "bParentIsFile": true,
+  "expectation": "恢复失败时要么整体回滚，要么明确告知哪些已改、哪些没改；当前实现只做逐文件尽力而为"
+}
+
+PROBE_RESULT=PARTIAL_RESTORE_CONFIRMED

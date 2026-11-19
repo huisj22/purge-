@@ -1,0 +1,19 @@
+﻿
+Purge+ 验收 · http://127.0.0.1:51721 · 数据目录 C:\Users\chenw\AppData\Local\Temp\purgeplus-accept-fTIKJA\data
+
+✓ 1 health — version=0.1.0-alpha.1
+✓ 2 host inspect — shape=both version=0.2.2-rc.5
+✓ 3 diagnose — level=unknown findings=7
+✓ 4a pack plan — 预演未改动磁盘
+✓ 4b pack apply — 快照 snap-mwnj3oks-2c6099b6
+✓ 4c pack verify — 复检为已应用
+✓ 4d pack revert — 字节与原始一致
+✓ 5a rule compose — included=acc-rule
+✓ 5b skill import — name=accept-skill
+✓ 6 plugin — health=true invoke={"reports":1}
+✓ 7 snapshot restore — 快照校验 + 恢复成功
+✓ 8 update — activated=9.9.9
+✓ 9 workflow — state=succeeded
+✓ 10 audit chain — checked=14
+
+结果：14/14 项通过

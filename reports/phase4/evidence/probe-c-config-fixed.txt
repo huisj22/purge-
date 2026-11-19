@@ -1,0 +1,16 @@
+﻿{
+  "bothClientsReadSameHash": true,
+  "fulfilled": 1,
+  "rejected": 1,
+  "rejectedReasons": [
+    {
+      "code": "conflict",
+      "message": "external modification detected for C:\\Users\\chenw\\AppData\\Local\\Temp\\p4-probe-cfg-L9TmxV\\target.json"
+    }
+  ],
+  "finalContent": "{\"v\":\"A\"}\n",
+  "historyEntries": 1,
+  "expectedBehaviour": "同一 expectHash 只允许一次提交成功，第二次必须 conflict"
+}
+
+PROBE_RESULT=guarded

@@ -1,0 +1,11 @@
+﻿{
+  "status": 403,
+  "ok": false,
+  "portBefore": 7801,
+  "portAfter": 7801,
+  "originSent": "https://evil.example",
+  "contentType": "text/plain",
+  "expectation": "非 JSON content-type 或跨源 Origin 的写入应被拒绝（415/403）"
+}
+
+PROBE_RESULT=blocked

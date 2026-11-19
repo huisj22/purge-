@@ -1,6 +1,6 @@
 # Purge+ project status
 
-Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **150 passed / 0 failed** + 验收 14/14
+Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **197 passed / 0 failed** + 验收 14/14 · Phase 4 独立验收完成
 
 ## 当前阶段
 
@@ -55,9 +55,22 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 | CLI（doctor/host/diagnose/pack/snapshot/workflow/job/audit/config/policy/serve） | `src/cli/main.ts` | 实机跑通 |
 | UI（8 屏零构建 SPA） | `src/ui/*` | `api`（静态资源）+ 人工验收 |
 
+## Phase 4 独立验收（2026-11-19）
+
+见 `reports/phase4/`（执行摘要、基准、14 份模块审计、故障注入、安全、真实环境、问题清单、修复记录、回归、最终验收、成熟度、下一阶段建议）。
+
+| 项 | 基线 8457ab7 | 现在 |
+| --- | --- | --- |
+| 测试 | 150 / 29 suites | 197 / 45 suites |
+| P0 | 1（API 无鉴权 + 跨站写入） | 0 |
+| P1 | 4（内核启动锁死、诊断误报、恢复非事务、插件边界失真） | 0 |
+| P2 | 12 | 2（P2-08 / P2-10，均为设计约束，已文档化） |
+| 成熟度 | — | M2.5（核心 M2–M3，宿主只读 M4，交付链路 M1） |
+
 ## 进行中
 
-- 安装器 `install --verify-first`（v0.2）、镜像/代理传输、归档换包（v0.3）、UI 可访问性审计
+- 安装器 `install --verify-first` + CI（最高优先级，见 `reports/phase4/NEXT_PHASE_RECOMMENDATIONS.md`）
+- 子进程插件隔离、跨进程维护锁、恢复差异提示
 
 ## 已知问题
 

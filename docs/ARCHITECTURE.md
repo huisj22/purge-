@@ -208,7 +208,7 @@ begin(label)
 ### 5.10 Plugin System（`src/plugins`）
 清单 `plugin.json`：`{name, version, apiVersion, entry, capabilities[], permissions[]}`。
 安装：复制到 `<dataDir>/plugins/<name>@<version>/`，记录 sha256 → 校验 → 注册。
-权限：插件只能拿到 `capabilities` 声明的服务；越权调用抛 `CapabilityError`。
+权限（**能力声明，不是沙箱**）：插件运行在宿主进程内，`ctx.use()` 只允许清单声明的服务，越权抛 `policy_denied`；但插件代码本身拥有与宿主相同的 Node 权限。`privilege: "host"` 的插件启用时必须显式信任，`invoke/health` 默认 5s 超时。
 健康检查：`health()` 导出可选；加载失败标记 `broken` 并保留其余插件可用。
 
 ### 5.11 Update Center（`src/update`）
@@ -238,10 +238,18 @@ begin(label)
 | GET | `/api/traces` `/api/traces/:id` `/api/metrics` `/api/logs` | 可观测性 |
 | GET/POST | `/api/snapshots` `/api/snapshots/:id/restore` | 恢复 |
 | GET | `/api/audit` | 审计链（含链校验状态） |
+| GET | `/api/managed` `/api/managed/history` | 受管配置读取与历史 |
+| GET/POST | `/api/skills*` | 技能库（扫描/导入/删除） |
 | GET/POST | `/api/plugins` `/api/plugins/install` | 插件 |
 | GET/POST | `/api/update/check|plan|apply` | 更新 |
 
 所有变更类接口带 `confirm` 语义；`deny` 直接 403 并写审计。
+
+**入口安全（Phase 4 修复 P0-01）**：
+1. 带 body 的变更请求必须是 `application/json`（否则 415）；
+2. 带 `Origin` 且与 `Host` 不同源 → 403；
+3. 配置 `apiToken` 后必须 `Authorization: Bearer`；未配置时只接受回环来源；
+4. `host` 非回环且未配置令牌时**拒绝启动**。
 
 ---
 

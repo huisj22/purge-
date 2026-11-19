@@ -15,6 +15,7 @@ async function makePlugin(root: string, name: string, opts: { capabilities?: str
     version: opts.version ?? "1.0.0",
     apiVersion: PLUGIN_API_VERSION,
     entry: "index.mjs",
+    privilege: "declared",
     description: "测试插件",
     capabilities: opts.capabilities ?? [],
   };
@@ -130,14 +131,14 @@ describe("plugin host", () => {
     const badVersion = await makePlugin(path.join(base, "src-d"), "bad-api", { version: "1.0.0" });
     await writeFile(
       path.join(badVersion, "plugin.json"),
-      JSON.stringify({ name: "bad-api", version: "1.0.0", apiVersion: "999", entry: "index.mjs", capabilities: [] }),
+      JSON.stringify({ name: "bad-api", version: "1.0.0", apiVersion: "999", entry: "index.mjs", privilege: "declared", capabilities: [] }),
     );
     await assert.rejects(() => host.install(badVersion), /apiVersion/);
 
     const escape = await makePlugin(path.join(base, "src-d2"), "escape", { version: "1.0.0" });
     await writeFile(
       path.join(escape, "plugin.json"),
-      JSON.stringify({ name: "escape", version: "1.0.0", apiVersion: PLUGIN_API_VERSION, entry: "../outside.mjs", capabilities: [] }),
+      JSON.stringify({ name: "escape", version: "1.0.0", apiVersion: PLUGIN_API_VERSION, entry: "../outside.mjs", privilege: "declared", capabilities: [] }),
     );
     await assert.rejects(() => host.install(escape), /entry/);
   });

@@ -31,6 +31,41 @@ export interface ApiHandle {
   close(): Promise<void>;
 }
 
+const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** 判定请求是否来自同源（浏览器跨站写入的第一道闸）。 */
+export function isSameOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true; // 非浏览器客户端不带 Origin；交给 token 层
+  try {
+    const parsed = new URL(origin);
+    const host = req.headers.host ?? "";
+    return parsed.host === host;
+  } catch {
+    return false;
+  }
+}
+
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK.has(host) || host.startsWith("127.");
+}
+
+/** 鉴权：配置了令牌就强制校验；未配置时只允许回环来源。 */
+export function checkAuth(req: IncomingMessage, token: string): { ok: boolean; reason?: string } {
+  if (token.length > 0) {
+    const header = req.headers.authorization ?? "";
+    const provided = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+    if (provided !== token) return { ok: false, reason: "invalid or missing bearer token" };
+    return { ok: true };
+  }
+  const remote = req.socket.remoteAddress ?? "";
+  if (!(remote.startsWith("127.") || remote === "::1" || remote === "::ffff:127.0.0.1")) {
+    return { ok: false, reason: "no apiToken configured; only loopback clients are accepted" };
+  }
+  return { ok: true };
+}
+
 const STATUS_BY_CODE: Record<string, number> = {
   invalid_argument: 400,
   schema_invalid: 400,
@@ -42,6 +77,7 @@ const STATUS_BY_CODE: Record<string, number> = {
   policy_denied: 403,
   confirmation_required: 428,
   unsupported: 501,
+  unsupported_media_type: 415,
   timeout: 504,
   service_failed: 500,
   internal: 500,
@@ -61,6 +97,28 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       if (url.pathname.startsWith("/api/")) {
+        const token = app.services.config.get().apiToken;
+        // 1) 鉴权（token 或回环来源）
+        const auth = checkAuth(req, token);
+        if (!auth.ok) {
+          throw new PurgeError({ code: "policy_denied", message: `unauthorized: ${auth.reason}` });
+        }
+        // 2) 跨站来源直接拒绝（浏览器发起的 CSRF 会带 Origin）
+        if (!isSameOrigin(req)) {
+          throw new PurgeError({ code: "policy_denied", message: "cross-origin request rejected" });
+        }
+        // 3) 带 body 的变更请求必须是 JSON（阻止 text/plain / 表单简单请求绕过预检）
+        const method = (req.method ?? "GET").toUpperCase();
+        if (MUTATING.has(method)) {
+          const hasBody = Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined;
+          const contentType = String(req.headers["content-type"] ?? "");
+          if (hasBody && !contentType.toLowerCase().startsWith("application/json")) {
+            throw new PurgeError({
+              code: "unsupported_media_type",
+              message: `content-type must be application/json, got "${contentType || "(none)"}"`,
+            });
+          }
+        }
         const result = await route(req, url);
         sendJson(res, 200, { ok: true, data: result });
       } else {
@@ -438,8 +496,8 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
           const { result } = await app.guarded(
             "api",
             { action: "plugin.enable", target: id, origin: "human" },
-            () => s.plugins.enable(id),
-            { confirmed: body.confirm === true },
+            () => s.plugins.enable(id, { trusted: body.confirm === true }),
+            { confirmed: body.confirm === true, forceConfirm: true },
           );
           return result;
         }
@@ -536,12 +594,14 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
       if (method === "GET" && !id) {
         const level = url.searchParams.get("level") ?? undefined;
         const contains = url.searchParams.get("contains") ?? undefined;
+        const traceId = url.searchParams.get("traceId") ?? undefined;
         const limit = Number(url.searchParams.get("limit") ?? 100);
         return {
           stats: s.logs.stats(),
           entries: s.logs.query({
             ...(level ? { level: level as never } : {}),
             ...(contains ? { contains } : {}),
+            ...(traceId ? { traceId } : {}),
             limit: Number.isFinite(limit) ? limit : 100,
           }),
         };
@@ -604,7 +664,10 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
   async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
     const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
     const file = path.resolve(staticDir, rel);
-    if (!file.startsWith(path.resolve(staticDir))) throw purgeError("policy_denied", "path traversal blocked");
+    const staticRoot = path.resolve(staticDir);
+    if (file !== staticRoot && !file.startsWith(staticRoot + path.sep)) {
+      throw purgeError("policy_denied", "path traversal blocked");
+    }
     let data: Buffer;
     try {
       data = await fsp.readFile(file);
@@ -633,6 +696,14 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
     await app.start();
     const port = opts.port ?? app.services.config.get().port;
     const host = opts.host ?? app.services.config.get().host;
+    const token = app.services.config.get().apiToken;
+    // 绑定守卫（P0-01）：非回环地址且未配置令牌时拒绝启动，避免把无鉴权写接口暴露到局域网。
+    if (!isLoopbackHost(host) && token.length === 0) {
+      throw purgeError("policy_denied", `refusing to bind ${host} without apiToken`, {
+        hint: "在配置中设置 apiToken，或改为 127.0.0.1 绑定",
+        host,
+      });
+    }
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(port, host, () => resolve());

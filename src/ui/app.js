@@ -945,6 +945,89 @@ async function viewObservability(root) {
   await renderLogs();
 }
 
+async function viewConfig(root) {
+  const data = await api("/api/config");
+  const patchInput = h("textarea", { rows: "6", cols: "70", placeholder: '{"port": 7801}' });
+  const result = h("div", { class: "section" });
+  const policyAction = h("input", { placeholder: "policy check: 例如 files.delete", size: "30" });
+  const policyPaths = h("input", { placeholder: "路径（逗号分隔，可选）", size: "34" });
+  const policyOut = h("div", { class: "pre" });
+
+  root.append(
+    h("div", { class: "section" }, [
+      h("h3", { text: "当前配置" }),
+      h("div", { class: "pre", text: JSON.stringify(data.config, null, 2) }),
+      h("div", { class: "hint", text: `配置文件：${data.config ? "config.json" : "?"} · 历史 ${data.history.length} 条` }),
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "修改配置（JSON patch，浅合并）" }),
+      patchInput,
+      h("div", { class: "actions" }, [
+        h("button", {
+          class: "action primary",
+          text: "提交变更",
+          onclick: async () => {
+            let patch;
+            try {
+              patch = JSON.parse(patchInput.value);
+            } catch (err) {
+              return toast(`不是合法 JSON：${err.message}`, true);
+            }
+            if (!confirm("确认写入配置？变更会记入审计链。")) return;
+            try {
+              const next = await api("/api/config", { method: "POST", body: { patch, confirm: true } });
+              result.replaceChildren(h("div", { class: "pre", text: `已更新：${JSON.stringify(next, null, 2)}` }));
+              toast("配置已更新");
+              render();
+            } catch (err) {
+              toast(`失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      result,
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "历史" }),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "#" }), h("th", { text: "时间" }), h("th", { text: "变更字段" })]),
+          ...(data.history.length
+            ? [...data.history].reverse().map((e) =>
+                h("tr", {}, [h("td", { text: String(e.seq) }), h("td", { class: "mono", text: e.ts }), h("td", { class: "mono", text: e.changed.join(", ") || "（未知字段）" })]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "3", class: "empty", text: "还没有配置变更" })])]),
+        ],
+      ),
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "策略预演（只读，不执行）" }),
+      h("div", { class: "actions" }, [
+        policyAction,
+        policyPaths,
+        h("button", {
+          class: "action",
+          text: "评估风险",
+          onclick: async () => {
+            try {
+              const verdict = await api("/api/policy", {
+                method: "POST",
+                body: { action: policyAction.value.trim(), paths: policyPaths.value.split(",").map((s) => s.trim()).filter(Boolean), origin: "human" },
+              });
+              policyOut.textContent = `${verdict.decision.toUpperCase()} risk=${verdict.risk}\n${verdict.factors.map((f) => `  ${f.code} +${f.weight} ${f.note}`).join("\n")}`;
+            } catch (err) {
+              toast(`评估失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      policyOut,
+    ]),
+  );
+}
+
 const VIEWS = {
   overview: viewOverview,
   hosts: viewHosts,
@@ -956,6 +1039,7 @@ const VIEWS = {
   jobs: viewJobs,
   ops: viewOps,
   observability: viewObservability,
+  config: viewConfig,
   audit: viewAudit,
 };
 

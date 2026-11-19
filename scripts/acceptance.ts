@@ -132,7 +132,7 @@ async function main(): Promise<void> {
     await mkdir(pluginSrc, { recursive: true });
     await writeFile(
       path.join(pluginSrc, "plugin.json"),
-      JSON.stringify({ name: "accept-plugin", version: "1.0.0", apiVersion: "1", entry: "index.mjs", capabilities: ["diagnostics"] }),
+      JSON.stringify({ name: "accept-plugin", version: "1.0.0", apiVersion: "1", entry: "index.mjs", privilege: "declared", capabilities: ["diagnostics"] }),
     );
     await writeFile(
       path.join(pluginSrc, "index.mjs"),

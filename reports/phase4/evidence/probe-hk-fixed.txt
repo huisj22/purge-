@@ -1,0 +1,22 @@
+﻿{
+  "probe": "H-plugin-boundary",
+  "pluginCapabilitiesDeclared": [],
+  "pluginWroteOutsideDataDir": true,
+  "fileContent": "plugin bypassed capability system",
+  "health": {
+    "ok": true,
+    "state": "enabled",
+    "detail": "wrote file without any capability"
+  },
+  "conclusion": "capability 白名单只约束 ctx.use()，不是进程级沙箱；插件代码拥有与宿主相同的 Node 权限"
+}
+H_RESULT=NOT_A_SANDBOX_CONFIRMED
+{
+  "probe": "K-config-write-failure",
+  "errorCode": "unwritable",
+  "inMemoryPortAfterFailure": 7801,
+  "diskReadable": false,
+  "historyEntries": 0,
+  "expectation": "写入失败时内存态必须回滚，否则后续请求会按未落盘的配置运行"
+}
+K_RESULT=consistent

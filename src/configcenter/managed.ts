@@ -83,25 +83,53 @@ export class ConfigCenter {
    */
   async commit(filePath: string, nextContent: string, opts: { expectHash?: string; actor?: string } = {}): Promise<ConfigVersion> {
     const abs = path.resolve(filePath);
-    const current = await this.read(abs);
-    if (opts.expectHash !== undefined && opts.expectHash !== current.hash) {
-      throw purgeError("conflict", `external modification detected for ${abs}`, {
-        expected: opts.expectHash,
-        actual: current.hash,
-        hint: "重新读取后再提交",
-      });
-    }
-    const nextHash = sha256(nextContent);
-    try {
-      await atomicWriteFile(abs, nextContent);
-    } catch (err) {
-      throw asPurgeError(err);
-    }
-    const after = await this.read(abs);
-    if (after.hash !== nextHash) {
-      throw purgeError("integrity_failed", `post-write verification failed for ${abs}`, { expected: nextHash, actual: after.hash });
-    }
-    return this.#record(abs, nextContent, after.hash, opts.actor ?? "system", current);
+    // P2-02：同一路径的提交串行化，避免两个客户端"都读到旧 hash 然后都写成功"。
+    return this.#withLock(abs, async () => {
+      const current = await this.read(abs);
+      if (opts.expectHash !== undefined && opts.expectHash !== current.hash) {
+        throw purgeError("conflict", `external modification detected for ${abs}`, {
+          expected: opts.expectHash,
+          actual: current.hash,
+          hint: "重新读取后再提交",
+        });
+      }
+      const nextHash = sha256(nextContent);
+      try {
+        await atomicWriteFile(abs, nextContent);
+      } catch (err) {
+        throw asPurgeError(err);
+      }
+      const after = await this.read(abs);
+      if (after.hash !== nextHash) {
+        throw purgeError("conflict", `concurrent modification detected for ${abs}`, {
+          expected: nextHash,
+          actual: after.hash,
+          hint: "另一个写入者先提交了；重新读取后再提交",
+        });
+      }
+      try {
+        return await this.#record(abs, nextContent, after.hash, opts.actor ?? "system", current);
+      } catch (err) {
+        // P3-13：记录失败时把文件恢复成提交前内容，避免"文件已改但无历史"
+        await atomicWriteFile(abs, current.content).catch(() => {});
+        throw purgeError("unwritable", `failed to record config history for ${abs}; file restored`, {
+          cause: asPurgeError(err).message,
+        });
+      }
+    });
+  }
+
+  readonly #locks = new Map<string, Promise<unknown>>();
+
+  /** 按路径串行化（进程内）。跨进程仍未互斥，见报告中的限制说明。 */
+  #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.#locks.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    this.#locks.set(key, run.then(
+      () => undefined,
+      () => undefined,
+    ));
+    return run;
   }
 
   async history(filePath?: string): Promise<ConfigVersion[]> {

@@ -146,7 +146,9 @@ export const RULES: Rule[] = [
     category: "process",
     evaluate({ facts }) {
       if (facts.loadedShape === "unknown") return null;
-      const mismatch = facts.shape === "both" && facts.loadedShape === "unpacked";
+      // P3-07：双形态这件事已经由 layout.dual_shape 报过，这里不再重复告警
+      if (facts.shape === "both") return null;
+      const mismatch = false;
       return {
         id: "process.disk_vs_loaded",
         ruleId: "process.disk_vs_loaded",
@@ -338,18 +340,19 @@ export const RULES: Rule[] = [
     category: "integrity",
     evaluate({ facts }) {
       if (facts.modification.looksModified !== true) return null;
-      const hasSnapshotDir = facts.archive.exists;
+      // P3-12：归档存在 ≠ 有可验证的快照。诊断层无法读取 Recovery 的快照库，
+      // 因此这里只能给 unknown，并明确指出"回滚能力需在快照屏确认"。
       return {
         id: "integrity.backups",
         ruleId: "integrity.backups",
         title: "存在可回滚的宿主快照",
         severity: "medium",
-        status: hasSnapshotDir ? "pass" : "unknown",
+        status: "unknown",
         rootCause: {
-          confidence: "verified",
-          text: hasSnapshotDir ? "原始 app.asar 仍在，可作为回滚源" : "宿主已被修改，但原始归档不存在；回滚能力取决于其它备份",
+          confidence: "inferred",
+          text: "宿主已被修改；诊断层无法证明存在可用的快照。请到「快照」屏确认，或先创建一份。",
         },
-        evidence: [ev("file", facts.archive.path)],
+        evidence: [ev("file", facts.archive.path, "归档存在，但不等于快照完整")],
       };
     },
   },
