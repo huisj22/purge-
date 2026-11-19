@@ -14,14 +14,23 @@
     "test": "node --test \"tests/**/*.test.ts\"",
     "test:one": "node --test",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests scripts",
+    "ci": "node scripts/ci.mjs",
+    "ci:install": "node scripts/ci.mjs install",
+    "package": "node scripts/package.mjs",
+    "install": "node scripts/install.mjs",
+    "preflight": "node scripts/install.mjs --preflight",
     "acceptance": "node scripts/acceptance.ts",
     "doctor": "node src/cli/main.ts doctor",
     "serve": "node src/cli/main.ts serve",
     "cli": "node src/cli/main.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "^22.20.5",
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.73.0"
   },
   "license": "MIT"
 }
