@@ -9,6 +9,7 @@
  */
 import * as path from "node:path";
 import { createApiServer } from "../api/server.ts";
+import { formatDiff } from "../configcenter/managed.ts";
 import { formatPlan } from "../packs/engine.ts";
 import { APP_VERSION, PurgeApp, resolveDataDir } from "../app.ts";
 import { asPurgeError, PurgeError } from "../core/errors.ts";
@@ -56,6 +57,7 @@ const HELP = `Purge+ ${APP_VERSION}
   job list|add <id> <workflowId> <cron|间隔秒>|pause <id>|resume <id>|rm <id>
   audit [--limit N]               审计（含链校验）
   config get|set <key=value...>
+  cfg read|diff <path> [--file <src>|--content <text>]|commit <path> --file <src> [--expect hash] [--yes]|history [path]
   policy check <action> [paths...] 风险评分预览
 
 退出码：0 成功 · 1 失败 · 2 用法错误 · 3 策略拒绝`;
@@ -515,6 +517,48 @@ async function main(argv: string[]): Promise<number> {
             { confirmed: flags.yes, forceConfirm: true },
           );
           out(result, `已激活 ${result.version}${result.previous ? `（上一版本 ${result.previous}）` : ""}`);
+          return EXIT.ok;
+        }
+        break;
+      }
+
+      case "cfg": {
+        const flagValue = (name: string): string | undefined => {
+          const i = rest.indexOf(name);
+          return i >= 0 ? rest[i + 1] : undefined;
+        };
+        if (sub === "read" && rest[0]) {
+          const file = await s.configCenter.read(rest[0]);
+          out(file, `${file.path}\n存在 ${file.exists} · ${file.size} 字节 · ${file.hash.slice(0, 16)}\n${file.content}`);
+          return EXIT.ok;
+        }
+        if (sub === "diff" && rest[0]) {
+          const fileFlag = flagValue("--file");
+          const next = fileFlag
+            ? await (await import("node:fs/promises")).readFile(path.resolve(fileFlag), "utf8")
+            : (flagValue("--content") ?? "");
+          if (!fileFlag && !flagValue("--content")) throw new PurgeError({ code: "invalid_argument", message: "需要 --file 或 --content" });
+          const diff = await s.configCenter.diff(rest[0], next);
+          out(diff, formatDiff(diff));
+          return EXIT.ok;
+        }
+        if (sub === "commit" && rest[0]) {
+          const fileFlag = flagValue("--file");
+          if (!fileFlag) throw new PurgeError({ code: "invalid_argument", message: "需要 --file <新内容来源>" });
+          const next = await (await import("node:fs/promises")).readFile(path.resolve(fileFlag), "utf8");
+          const expect = flagValue("--expect");
+          const { result } = await app.guarded(
+            "cli",
+            { action: "config.set", target: rest[0], paths: [path.resolve(rest[0] as string)], origin: "human" },
+            () => s.configCenter.commit(rest[0] as string, next, { ...(expect ? { expectHash: expect } : {}), actor: "cli" }),
+            { confirmed: flags.yes },
+          );
+          out(result, `已提交 ${result.path}（版本 ${result.id}）`);
+          return EXIT.ok;
+        }
+        if (sub === "history") {
+          const list = await s.configCenter.history(rest[0]);
+          out(list, list.map((v) => `${v.savedAt}\t${v.id}\t${v.path}\t${v.size} 字节\t${v.actor}`).join("\n") || "没有历史版本");
           return EXIT.ok;
         }
         break;

@@ -17,6 +17,7 @@ import { createLogger, type Logger } from "./core/logger.ts";
 import { DiagnosticsService } from "./inspector/diagnostics.ts";
 import { PackEngine } from "./packs/engine.ts";
 import { PackStore } from "./packs/store.ts";
+import { ConfigCenter } from "./configcenter/managed.ts";
 import { PluginHost } from "./plugins/host.ts";
 import { UpdateService } from "./update/service.ts";
 import { RuleStore } from "./ruleskills/rules.ts";
@@ -69,6 +70,7 @@ export interface AppServices {
   diagnostics: DiagnosticsService;
   workflow: WorkflowEngine;
   scheduler: Scheduler;
+  configCenter: ConfigCenter;
   plugins: PluginHost;
   updates: UpdateService;
   rules: RuleStore;
@@ -139,6 +141,7 @@ export class PurgeApp {
       channel: cfg.update.channel,
       ...(cfg.update.indexUrl ? { indexSource: cfg.update.indexUrl } : {}),
     });
+    const configCenter = new ConfigCenter(dataDir);
     const rules = new RuleStore(dataDir);
     const skills = new SkillLibrary(dataDir);
     const packs = new PackStore(dataDir);
@@ -183,6 +186,7 @@ export class PurgeApp {
       diagnostics,
       workflow,
       scheduler,
+      configCenter,
       plugins,
       updates,
       rules,
@@ -267,6 +271,7 @@ function resolveCapability(services: AppServices | null, capability: string): un
     metrics: services.metrics,
     config: services.config,
     updates: services.updates,
+    configCenter: services.configCenter,
   };
   const found = map[capability];
   if (!found) throw new Error(`unknown capability: ${capability}`);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -321,6 +321,45 @@ describe("http api", () => {
     assert.equal(plan.json.data?.to, "9.9.9");
     const noConfirm = await api(base, "POST", "/api/update/apply", { index: indexFile, version: "9.9.9" });
     assert.equal(noConfirm.status, 428, "update apply must require confirmation");
+  });
+
+  it("manages external config files with conflict detection", async () => {
+    const file = path.join(tmp, "managed.json");
+    await writeFile(file, '{"a":1}\n', "utf8");
+    const read = await api<{ hash: string; content: string }>(base, "GET", `/api/managed?path=${encodeURIComponent(file)}`);
+    assert.equal(read.json.data?.content, '{"a":1}\n');
+    const hash = read.json.data?.hash as string;
+
+    const diff = await api<{ addedLines: number; removedLines: number }>(base, "POST", "/api/managed/diff", {
+      path: file,
+      content: '{"a":2}\n',
+    });
+    assert.equal(diff.json.data?.addedLines, 1);
+    assert.equal(await readFile(file, "utf8"), '{"a":1}\n', "diff endpoint must not write");
+
+    const refused = await api(base, "POST", "/api/managed/commit", { path: file, content: '{"a":2}\n', expectHash: hash });
+    assert.equal(refused.status, 428, "commit requires confirmation");
+
+    await writeFile(file, '{"a":"external"}\n', "utf8");
+    const conflict = await api(base, "POST", "/api/managed/commit", {
+      path: file,
+      content: '{"a":2}\n',
+      expectHash: hash,
+      confirm: true,
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.json.error?.code, "conflict");
+
+    const fresh = await api<{ hash: string }>(base, "GET", `/api/managed?path=${encodeURIComponent(file)}`);
+    const committed = await api<{ id: string }>(base, "POST", "/api/managed/commit", {
+      path: file,
+      content: '{"a":3}\n',
+      expectHash: fresh.json.data?.hash,
+      confirm: true,
+    });
+    assert.equal(committed.status, 200);
+    const history = await api<Array<{ id: string }>>(base, "GET", `/api/managed/history?path=${encodeURIComponent(file)}`);
+    assert.ok((history.json.data?.length ?? 0) >= 1);
   });
 
   it("serves the ui shell and its assets", async () => {

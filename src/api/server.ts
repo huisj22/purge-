@@ -498,6 +498,40 @@ export function createApiServer(opts: ApiOptions): ApiHandle {
       }
     }
 
+    if (resource === "managed") {
+      if (method === "GET" && !id) {
+        const p = url.searchParams.get("path");
+        if (!p) throw purgeError("invalid_argument", "path query param is required");
+        return s.configCenter.read(p);
+      }
+      if (method === "GET" && id === "history") {
+        const p = url.searchParams.get("path");
+        return s.configCenter.history(p ?? undefined);
+      }
+      if (method === "POST" && id === "diff") {
+        const body = await readJson(req, maxBody);
+        const target = String(body.path ?? "");
+        if (!target) throw purgeError("invalid_argument", "path is required");
+        return s.configCenter.diff(target, String(body.content ?? ""));
+      }
+      if (method === "POST" && id === "commit") {
+        const body = await readJson(req, maxBody);
+        const target = String(body.path ?? "");
+        if (!target) throw purgeError("invalid_argument", "path is required");
+        const { result } = await app.guarded(
+          "api",
+          { action: "config.set", target, paths: [target], origin: "human" },
+          () =>
+            s.configCenter.commit(target, String(body.content ?? ""), {
+              ...(typeof body.expectHash === "string" ? { expectHash: body.expectHash } : {}),
+              actor: "api",
+            }),
+          { confirmed: body.confirm === true },
+        );
+        return result;
+      }
+    }
+
     if (resource === "traces") {
       if (method === "GET" && !id) return s.traces.listTraces({ limit: 50 });
       if (method === "GET" && id) return s.traces.spansOf(id);
