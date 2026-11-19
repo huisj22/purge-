@@ -16,7 +16,7 @@
 | H | 五批 Commit | ✅ 完成 | `527136d` / `fdc2a9f` / `10267db` / `6ba28d9` / `544fc1a`（+`7ad9591` 收尾） |
 | I | 隔离副本真实写入验证 | ✅ 完成（17/17） | `docs/phase5/ISOLATED_HOST_WRITE_VERIFICATION.md`；真实宿主 21789 条哈希未变 |
 | J | P2-13 写入口锁 | ✅ PARTIAL→补齐主要入口 | `docs/phase5/P2-13_WRITE_PATH_LOCK_AUDIT.md`、`tests/write-path-locks.test.ts`（6 例） |
-| K | GitHub 推送 + CI 矩阵 | ❌ BLOCKED | `docs/phase5/GITHUB_CI_STATUS.md`（无 remote/凭据，exit 128） |
+| K | GitHub 推送 + CI 矩阵 | ✅ 完成（3 平台全绿） | run 44540146301；`docs/phase5/GITHUB_CI_STATUS.md` |
 
 ## 基线（Stage A 实测）
 
@@ -78,5 +78,5 @@
 | F T-036 | `src/plugins/{worker-runtime,isolated-host,host}.ts`、`core/config.ts`、`app.ts` | `tests/plugin-isolation.test.ts`（9） | 9/9 | OS 沙箱未实现（BLOCKED）；能力为服务级（P2-14） |
 | G | `scripts/acceptance.ts`（第 7 步改为 plan→409→force） | — | 255 tests / tsc 0 / lint 0 / acceptance 14/14 / 本地 CI 8/8 | GitHub Actions 未运行 |
 
-**最终数字（收尾轮）**：261 tests / 56 suites / 0 fail / 0 skip；`tsc --noEmit` 0 错误；eslint 0 error；acceptance 14/14；本地 CI 8/8；隔离副本写入 17/17；真实宿主哈希未变。
+**最终数字（收尾轮 2）**：261 tests / 56 suites / 0 fail / 0 skip；`tsc --noEmit` 0 错误；eslint 0 error；acceptance 14/14；本地 CI 8/8；隔离副本写入 17/17；真实宿主哈希未变；GitHub CI 三平台（win/ubuntu/macos）全绿。
 **Git**：分支 `main`，HEAD 仍为 `06b1701`，40 个文件有未提交修改（按任务书未自动 Commit）。

@@ -30,9 +30,9 @@
 
 | 能力 | Windows 11 本机 | 隔离副本（Windows） | GitHub Windows | GitHub Ubuntu | GitHub macOS |
 | --- | --- | --- | --- | --- | --- |
-| 全量测试（261） | ✅ | — | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED（无 job） |
-| 安装/卸载 | ✅ | ✅ | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED |
-| pack apply / snapshot / restore / rollback | ✅（副本） | ✅ 17/17 | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED |
+| 全量测试（261） | ✅ | — | ✅ | ✅ | ✅ |
+| 安装/卸载 | ✅ | ✅ | ✅（CI smoke） | ✅（CI smoke） | ✅（CI smoke） |
+| pack apply / snapshot / restore / rollback | ✅（副本） | ✅ 17/17 | ✅（单测） | ✅（单测） | ✅（单测） |
 | 真实宿主写入 | ❌ BLOCKED（安全规则） | — | — | — | — |
 
-标记：`LOCAL_WINDOWS_11_VERIFIED` = TRUE；`GITHUB_WINDOWS_RUNNER_VERIFIED` / `GITHUB_UBUNTU_RUNNER_VERIFIED` / `GITHUB_MACOS_RUNNER_VERIFIED` = **NOT_VERIFIED**（推送被 BLOCKED，见 `GITHUB_CI_STATUS.md`）。
+标记（2026-11-19 22:1x 更新）：`LOCAL_WINDOWS_11_VERIFIED` = TRUE；`GITHUB_WINDOWS_RUNNER_VERIFIED` / `GITHUB_UBUNTU_RUNNER_VERIFIED` / `GITHUB_MACOS_RUNNER_VERIFIED` = **TRUE**（run 44540146301 三平台全绿，见 `GITHUB_CI_STATUS.md`）。

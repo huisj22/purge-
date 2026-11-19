@@ -57,5 +57,13 @@
 | I-03 | 路径逃逸 / 符号链接 / junction 测试 | done | 同上 §6/§7 |
 | J-01 | Rules/Skills/Self-Config 加锁 | done | `tests/write-path-locks.test.ts` |
 | J-02 | Audit 并发（事务化 seq） | done（修复 UNIQUE 冲突） | 同上 |
-| K-01 | 推送 `phase5/verification` | **blocked** | 无 remote（`git push` exit 128） |
-| K-02 | GitHub Windows/Ubuntu/macOS CI | **not_verified** | 从未运行；且 matrix 无 macOS |
+| K-01 | 推送 `phase5/verification` | done | 直连/代理各一次成功；`origin` = huisj22/purge- |
+| K-02 | GitHub Windows/Ubuntu/macOS CI | done（全绿） | run 44540146301 |
+## 收尾轮 2（2026-11-19 22:1x）
+
+| ID | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| K-03 | 修复 `install` 生命周期钩子 | done | `1272ed4`；干净副本 `pnpm install` exit 0 |
+| K-04 | 修复 ENOTDIR/ENOENT 差异 | done | `4d9800e`；Ubuntu/macOS 转绿 |
+| K-05 | matrix 增加 macOS | done | `97b56b1`；三平台实跑通过 |
+| K-06 | 推送触发分支（phase5/**） | done | 同上 |

@@ -183,3 +183,25 @@ Workflow 经 YAML 解析器验证有效、无 secrets、无部署步骤。
 ## 6. 结论
 
 Phase 5 仍为 **PARTIAL**：五个任务的实现与验证完成，隔离写入首次得到真实证据；但 GitHub CI 与 macOS/Linux 平台验证被环境阻塞，T-037 对全部写入口的覆盖仍不完整。
+---
+
+# 附二：GitHub CI 打通（2026-11-19 22:1x）
+
+| 项 | 结果 |
+| --- | --- |
+| 仓库 | `https://github.com/huisj22/purge-`（真实名含尾部连字符；用户给出的 URL 带中文标注） |
+| 分支 | `phase5/verification`（`main` 未被触碰） |
+| 推送次数 | 4 次（1 次直连成功；5 次直连超时；代理 HTTP/1.1 成功） |
+| CI 运行 | 3 次：`44538278925` ❌ / `44538840162` ❌ / **`44540146301` ✅** |
+| 最终结果 | Windows + Ubuntu + macOS 三平台 verify job **全部 success**，artifact job success |
+
+**CI 发现并修复的两个真实缺陷**
+
+1. `"install"` 脚本被 pnpm 当作生命周期钩子自动执行 → 三平台依赖安装即失败（改名 `install:app`，`1272ed4`）。
+2. `ENOTDIR`（POSIX）与 `ENOENT`（Windows）语义差异 → 恢复回滚在 Linux/macOS 误判失败（`4d9800e`）。
+
+这两个缺陷在本地 Windows 上都不会暴露，证明多平台矩阵有实际价值。
+
+**平台标记更新**：`GITHUB_WINDOWS_RUNNER_VERIFIED` / `GITHUB_UBUNTU_RUNNER_VERIFIED` / `GITHUB_MACOS_RUNNER_VERIFIED` 全部 = TRUE。
+
+**仍未验证**：Node 22 运行时（matrix 仅 24）、真实宿主写入（BLOCKED）、分支保护配置。

@@ -26,8 +26,8 @@
 | P2-14 | 插件能力白名单是服务级，非方法级 | OPEN | 声明 `snapshots` 即可调用 `restore` | 能力声明改为 `service.method` 集合 |
 | P2-15 | 策略文件写入未加锁、无签名 | OPEN | 并发改策略可能互相覆盖；有文件权限者可连同 hash 一起改 | 接入写锁 + 可选签名 |
 | P2-16 | 审计库与数据目录对插件可写 | OPEN（需 OS 沙箱） | 恶意插件可篡改审计/数据 | 子进程独立用户 + 目录权限 |
-| P2-17 | 安装器未在 Linux/macOS 验证 | NOT_VERIFIED | 跨平台可能因 rename/权限语义失败 | CI 实跑 |
-| P2-18 | GitHub Actions 从未运行 | **BLOCKED** | 无 remote/凭据，推送 exit 128 | 用户提供仓库后 `git push` + 观察 |
+| P2-17 | 安装器未在 Linux/macOS 验证 | **FIXED** | CI 三平台全绿（run 44540146301） | — |
+| P2-18 | GitHub Actions 从未运行 | **FIXED** | 三次运行，最终三平台全绿 | — |
 
 ## P3（体验 / 局部优化）
 
@@ -75,6 +75,15 @@
 | — | Audit 多进程并发 `UNIQUE constraint failed: audit.seq` | **FIXED** | 改为 `BEGIN IMMEDIATE` 内分配 seq |
 | — | 隔离副本写入验证缺失 | **FIXED** | 17/17，真实宿主哈希未变 |
 | P2-19 | GitHub CI 未运行（无 remote） | BLOCKED | 需用户提供仓库与凭据 |
-| P2-20 | workflow 无 macOS job | OPEN | 需新增 matrix 条目并在有环境时验证 |
+| P2-20 | workflow 无 macOS job | **FIXED** | matrix 已加 macos-latest 并实跑通过 |
 | P3-34 | T-037 未覆盖 `prune`/备份 GC | OPEN | 与 capture 并发窗口小 |
 | P3-35 | 隔离验证依赖 robocopy（Windows 专用） | ACCEPTED | 脚本层面的平台限制，不影响产品 |
+## 收尾轮 2（GitHub CI 打通）新增
+
+| ID | 问题 | 状态 | 说明 |
+| --- | --- | --- | --- |
+| — | `install` 脚本被 pnpm 当生命周期钩子 → 三平台安装即失败 | **FIXED** | 重命名 `install:app`（`1272ed4`） |
+| — | POSIX `ENOTDIR` 与 Windows `ENOENT` 语义差异导致回滚误判失败 | **FIXED** | absent 删除同时接受两种错误码（`4d9800e`） |
+| P2-21 | Node 22 运行时未在 CI 验证（matrix 仅 24） | OPEN | engines 已修正 >=22.18；如需覆盖可加 matrix 条目 |
+| P2-22 | 分支保护/必需检查未配置 | OPEN | 需仓库管理员在 GitHub 设置 |
+| P3-36 | CI 经本地代理推送到 HTTP/2 会 408 | ACCEPTED | 使用 HTTP/1.1 直连或代理均可绕开；非产品缺陷 |
