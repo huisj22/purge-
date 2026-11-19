@@ -46,7 +46,7 @@ export function parseFrontmatter(text: string): Frontmatter {
       continue;
     }
     const key = line.slice(0, idx).trim();
-    let value = line.slice(idx + 1).trim();
+    const value = line.slice(idx + 1).trim();
     currentKey = key;
     if (value === "|" || value === ">") {
       // 多行块：收集后续缩进行
