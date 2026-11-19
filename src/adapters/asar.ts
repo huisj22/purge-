@@ -72,7 +72,7 @@ export function lookupAsarNode(index: AsarIndex, entryPath: string): AsarNode | 
   const parts = entryPath.split(/[\\/]+/).filter((p) => p.length > 0 && p !== ".");
   let node: AsarNode | undefined = { files: index.header.files };
   for (const part of parts) {
-    const next = node?.files?.[part];
+    const next: AsarNode | undefined = node?.files?.[part];
     if (!next) return undefined;
     node = next;
   }

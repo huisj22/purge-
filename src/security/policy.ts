@@ -112,7 +112,7 @@ export function guard(req: ActionRequest, cfg: PolicyConfig = DEFAULT_POLICY, op
       factors: verdict.factors,
     });
   }
-  const needConfirm = verdict.decision === "confirm" || (opts.forceConfirm === true && verdict.decision !== "deny");
+  const needConfirm = verdict.decision === "confirm" || opts.forceConfirm === true;
   if (needConfirm && opts.confirmed !== true) {
     throw purgeError("confirmation_required", `confirmation required for ${req.action}`, {
       risk: verdict.risk,

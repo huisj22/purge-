@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "purge-plus",
   "version": "0.1.0-alpha.1",
   "private": true,
@@ -19,9 +19,8 @@
     "cli": "node src/cli/main.ts"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "@types/node": "^22.10.2"
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
   },
   "license": "MIT"
 }
-

@@ -108,7 +108,7 @@ function scalarOk(spec: FieldSpec, raw: unknown, path: string, issues: Validatio
   }
 }
 
-export function validateSchema<T extends Record<string, unknown>>(
+export function validateSchema<T extends object>(
   schema: Schema,
   input: Record<string, unknown>,
   prefix = "",

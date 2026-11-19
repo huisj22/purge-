@@ -92,7 +92,7 @@ describe("scheduler", () => {
   });
 
   it("never runs the same job concurrently", async () => {
-    let release: (() => void) | null = null;
+    const gate: { release?: () => void } = {};
     const started: string[] = [];
     const db = openMemoryDatabase();
     let clock = 1_700_000_000_000;
@@ -105,7 +105,7 @@ describe("scheduler", () => {
       runJob: async (job) => {
         started.push(job.id);
         await new Promise<void>((resolve) => {
-          release = resolve;
+          gate.release = resolve;
         });
       },
     });
@@ -114,7 +114,7 @@ describe("scheduler", () => {
     clock += 120_000;
     await s.tick();
     assert.deepEqual(started, ["long"], "still-running job must not be dispatched twice");
-    release?.();
+    gate.release?.();
     await new Promise((r) => setTimeout(r, 10));
     await s.tick();
     assert.deepEqual(started, ["long", "long"]);

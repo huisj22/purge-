@@ -92,7 +92,7 @@ export function nextRun(spec: CronSpec, from: number): number | null {
 
 /** 日与周都受限制时按 Vixie cron 语义取「或」；只有一方受限时取「与」。 */
 function matchesDay(spec: CronSpec, dom: number, dow: number): boolean {
-  const domRestricted = spec.days.size !== RANGES[2][1] - RANGES[2][0] + 1;
+  const domRestricted = spec.days.size !== 31; // 1..31
   const dowRestricted = spec.weekdays.size !== 7;
   const domOk = spec.days.has(dom);
   const dowOk = spec.weekdays.has(dow);

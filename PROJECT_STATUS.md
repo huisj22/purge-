@@ -12,7 +12,8 @@ Phase 0（原项目研究）、Phase 1（设计）、Phase 2（核心框架）�
 
 | 命令 | 输出/结果 |
 | --- | --- |
-| `node --test "tests/**/*.test.ts"` | `tests 106 / pass 106 / fail 0` |
+| `node --test \"tests/**/*.test.ts\"` | `tests 106 / pass 106 / fail 0` |
+| `npx tsc --noEmit` | exit 0（0 类型错误，typescript 5.9.3） |
 | `node src/cli/main.ts doctor` | `审计链 ✓ 完整`、`宿主 1 个：dsh@24d1d554`、exit 0 |
 | `node src/cli/main.ts host inspect dsh@24d1d554` | `@deepseek-ai/dsh-desktop@0.2.2-rc.5（verified）· 磁盘 both · 进程 running · 加载 unpacked · 修改痕迹 已修改` |
 | `node src/cli/main.ts diagnose` | `WARN · 通过 7 / 警告 3 / 失败 0`（修复了官方 bundle 误报后） |
@@ -47,7 +48,7 @@ Phase 0（原项目研究）、Phase 1（设计）、Phase 2（核心框架）�
 
 ## 已知问题
 
-1. **未做类型检查**：`tsc --noEmit` 需要先 `pnpm i` 安装 devDependencies，本会话未联网安装；当前仅由 Node type stripping 保证语法与运行正确。
+1. `tsc --noEmit` 已通过（typescript 5.9.3 / @types/node 22.20.5，exit 0，0 错误）。
 2. `recentReports` 与 workflow 共用 `run` 表（靠 `kind` 区分），缺独立表；已可用但不够干净。
 3. 诊断规则 12 条，覆盖 identity/layout/process/profile/modification/integrity；尚未覆盖磁盘空间、权限 ACL、日志增长。
 4. 修改包只支持**已解包**宿主（v0.1 明确不做归档换包），sealed 宿主返回 `unsupported` 并给出原因。

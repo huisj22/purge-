@@ -75,7 +75,7 @@ export class PurgeApp {
   readonly dataDir: string;
   readonly kernel: Kernel;
   readonly bus: EventBus;
-  readonly logger: Logger;
+  logger: Logger;
   #services: AppServices | null = null;
   #started = false;
   readonly #opts: AppOptions;

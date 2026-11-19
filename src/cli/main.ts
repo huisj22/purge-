@@ -233,7 +233,7 @@ async function main(argv: string[]): Promise<number> {
           const { result } = await app.guarded(
             "cli",
             { action: "job.add", target: id, origin: "human" },
-            () => s.scheduler.add({ id, kind: "workflow", payload: { workflowId }, schedule }),
+            async () => s.scheduler.add({ id, kind: "workflow", payload: { workflowId }, schedule }),
             { confirmed: flags.yes, forceConfirm: true },
           );
           out(result, `已添加 ${result.id}，下次 ${result.nextRunMs === undefined ? "-" : new Date(result.nextRunMs).toISOString()}`);

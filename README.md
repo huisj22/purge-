@@ -106,7 +106,7 @@ adapters(dsh/asar) · storage(sqlite)                     ← 适配层
 
 ```bash
 node --test "tests/**/*.test.ts"   # 当前 106 项，全绿
-npx tsc --noEmit                   # 类型检查（需 pnpm i 安装 devDeps）
+pnpm i && npx tsc --noEmit        # 类型检查（已通过，0 错误）
 ```
 
 - 源码是 TypeScript，但**由 Node 原生 type stripping 直接运行**，不需要构建。
