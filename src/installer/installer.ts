@@ -92,6 +92,13 @@ const EXCLUDED_DIRS = new Set([
   ".purge",
 ]);
 const STATE_BASENAME = ".purgeplus-install-state.json";
+// 归档/产物类文件不进入安装包（避免把用户下载的压缩包当源码打包）
+const EXCLUDED_EXTS = new Set([".zip", ".tar", ".gz", ".tgz", ".7z", ".rar", ".iso"]);
+function isExcludedFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  for (const ext of EXCLUDED_EXTS) if (lower.endsWith(ext)) return true;
+  return false;
+}
 
 export class Installer {
   readonly installDir: string;
@@ -415,6 +422,7 @@ export async function hashTree(root: string): Promise<Array<{ path: string; sha2
       if (entry.isDirectory()) {
         await walk(abs, relPath);
       } else if (entry.isFile()) {
+        if (isExcludedFile(entry.name)) continue;
         const st = await fsp.stat(abs);
         out.push({ path: relPath, sha256: await sha256File(abs), size: st.size });
       }

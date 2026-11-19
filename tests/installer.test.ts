@@ -301,6 +301,7 @@ describe("T-035 package exclusions", () => {
       await mkdir(path.join(root, dir), { recursive: true });
       await writeFile(path.join(root, dir, "junk.bin"), "x");
     }
+    await writeFile(path.join(root, "downloaded-pack.zip"), Buffer.alloc(64));
     const files = await hashTree(root);
     const paths = files.map((f) => f.path);
     assert.ok(paths.includes("src/main.ts"));
@@ -308,5 +309,6 @@ describe("T-035 package exclusions", () => {
     for (const dir of [".pnpm/", "dist/", "coverage/", "reports/", "node_modules/", "references/"]) {
       assert.equal(paths.some((p) => p.startsWith(dir)), false, `must exclude ${dir}`);
     }
+    assert.equal(paths.includes("downloaded-pack.zip"), false, "archives must not be packaged");
   });
 });
