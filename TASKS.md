@@ -32,6 +32,6 @@
 | T-032 | 修复 P0/P1（5 项） | P0 | done | T-031 | 先失败测试后通过 | tests/phase4-regressions / phase4-security |
 | T-033 | 修复 P2/P3（27 项） | P1 | done | T-032 | 见 ISSUE_REGISTER | 同上 |
 | T-034 | 真实环境只读验证 | P1 | done | T-032 | 实机诊断/取证/doctor | reports/phase4/REAL_ENVIRONMENT_VALIDATION.md |
-| T-035 | 安装器 + CI | P0 | todo | T-033 | 新机器可装可升级 | 待建 |
-| T-036 | 子进程插件隔离 | P1 | todo | T-033 | 插件越权被 OS 限制 | 待建 |
-| T-037 | 跨进程维护锁 | P1 | todo | T-033 | 两实例并发写不互相覆盖 | 待建 |
+| T-035 | 安装器 + CI | P0 | done | T-033 | 新机器可装可升级 | tests/installer.test.ts + scripts/ci.mjs |
+| T-036 | 子进程插件隔离 | P1 | done（OS 级 BLOCKED） | T-033 | 进程隔离+IPC+超时+崩溃隔离 | tests/plugin-isolation.test.ts |
+| T-037 | 跨进程维护锁 | P1 | done（核心写路径） | T-033 | 两实例并发写不互相覆盖 | tests/lock.test.ts |

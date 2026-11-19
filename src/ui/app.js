@@ -301,7 +301,8 @@ async function viewSnapshots(root) {
                       text: "校验",
                       onclick: async () => {
                         const v = await api(`/api/snapshots/${s.snapId}/verify`);
-                        v.ok ? toast("快照完整") : toast(`快照损坏：${v.issues.join("; ")}`, true);
+                        if (v.ok) toast("快照完整");
+                        else toast(`快照损坏：${v.issues.join("; ")}`, true);
                       },
                     }),
                     " ",
@@ -863,7 +864,7 @@ async function viewOps(root) {
 }
 
 async function viewObservability(root) {
-  const [traces, logs, metrics] = await Promise.all([api("/api/traces"), api("/api/logs?limit=80"), api("/api/metrics")]);
+  const [traces, metrics] = await Promise.all([api("/api/traces"), api("/api/metrics")]);
   const levelSelect = h(
     "select",
     {},

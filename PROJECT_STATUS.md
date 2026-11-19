@@ -1,6 +1,6 @@
 # Purge+ project status
 
-Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **197 passed / 0 failed** + 验收 14/14 · Phase 4 独立验收完成
+Updated: 2026-11-19 · Phase: 0 ✅ · 1 ✅ · 2 ✅ · 3（继承）基本完成 · 测试 **255 passed / 0 failed** + 验收 14/14 · Phase 5（Reliability / Security Boundary / Recovery / Delivery）完成，见 `docs/phase5/`
 
 ## 当前阶段
 

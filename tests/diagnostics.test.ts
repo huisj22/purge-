@@ -13,7 +13,7 @@ import { openMemoryDatabase } from "../src/storage/database.ts";
 import { MetricStore, TraceStore } from "../src/storage/trace.ts";
 import { makeFakeHost } from "./helpers/fixtures.ts";
 
-async function buildFixture(base: string) {
+async function buildFixture(_base: string) {
   const db = openMemoryDatabase();
   const bus = new EventBus();
   const logger = createLogger({ sink: () => {} });
