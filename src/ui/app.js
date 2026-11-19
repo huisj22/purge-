@@ -752,6 +752,116 @@ async function viewRules(root) {
   );
 }
 
+async function viewOps(root) {
+  const [plugins, updateStatus] = await Promise.all([api("/api/plugins"), api("/api/update")]);
+  const pluginPath = h("input", { placeholder: "插件目录绝对路径", size: "46" });
+  const indexInput = h("input", { placeholder: "release index 路径或 URL", size: "46" });
+  const checkBox = h("div", { class: "section" });
+
+  root.append(
+    h("div", { class: "section" }, [
+      h("h3", { text: "插件" }),
+      h("div", { class: "actions" }, [
+        pluginPath,
+        h("button", {
+          class: "action primary",
+          text: "安装",
+          onclick: async () => {
+            try {
+              const r = await api("/api/plugins/install", { method: "POST", body: { path: pluginPath.value.trim(), confirm: true } });
+              toast(`已安装 ${r.manifest.name}（${r.state}）`);
+              render();
+            } catch (err) {
+              toast(`安装失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      h(
+        "table",
+        {},
+        [
+          h("tr", {}, [h("th", { text: "插件" }), h("th", { text: "状态" }), h("th", { text: "能力" }), h("th", { text: "操作" })]),
+          ...(plugins.length
+            ? plugins.map((p) =>
+                h("tr", {}, [
+                  h("td", {}, [h("div", { class: "mono", text: `${p.manifest.name}@${p.manifest.version}` }), h("div", { class: "hint", text: p.error ?? p.manifest.description ?? "" })]),
+                  h("td", {}, [pill(p.state, statusKind(p.state))]),
+                  h("td", { class: "mono", text: p.manifest.capabilities.join(", ") || "—" }),
+                  h("td", {}, [
+                    h("button", {
+                      class: "action",
+                      text: p.state === "enabled" ? "停用" : "启用",
+                      onclick: async () => {
+                        try {
+                          await api(`/api/plugins/${p.manifest.name}/${p.state === "enabled" ? "disable" : "enable"}`, { method: "POST", body: { confirm: true } });
+                          render();
+                        } catch (err) {
+                          toast(`操作失败：${err.message}`, true);
+                        }
+                      },
+                    }),
+                    " ",
+                    h("button", {
+                      class: "action",
+                      text: "健康",
+                      onclick: async () => {
+                        try {
+                          const hh = await api(`/api/plugins/${p.manifest.name}/health`);
+                          toast(`${p.manifest.name}: ${hh.ok ? "健康" : "异常"}（${hh.state}）${hh.detail ?? ""}`, !hh.ok);
+                        } catch (err) {
+                          toast(`检查失败：${err.message}`, true);
+                        }
+                      },
+                    }),
+                  ]),
+                ]),
+              )
+            : [h("tr", {}, [h("td", { colspan: "4", class: "empty", text: "还没有插件" })])]),
+        ],
+      ),
+    ]),
+    h("div", { class: "section" }, [
+      h("h3", { text: "更新" }),
+      h("div", { class: "pre", text: `当前 ${updateStatus.current}${updateStatus.status?.activeVersion ? ` · 已激活 ${updateStatus.status.activeVersion}` : ""}${updateStatus.status?.lastCheck ? ` · 上次检查 latest=${updateStatus.status.lastCheck.latest ?? "-"}` : ""}` }),
+      h("div", { class: "actions" }, [
+        indexInput,
+        h("button", {
+          class: "action primary",
+          text: "检查更新",
+          onclick: async () => {
+            try {
+              const r = await api("/api/update/check", { method: "POST", body: indexInput.value.trim() ? { index: indexInput.value.trim() } : {} });
+              checkBox.replaceChildren(
+                h("h3", { text: "检查结果" }),
+                h("div", { class: "pre", text: `当前 ${r.current} · 最新 ${r.latest ?? "-"} · ${r.hasUpdate ? "有更新" : "已是最新"}${r.note ? `（${r.note}）` : ""}` }),
+                h("div", { class: "actions" }, [
+                  h("button", {
+                    class: "action",
+                    text: "查看计划",
+                    onclick: async () => {
+                      try {
+                        const plan = await api("/api/update/plan", { method: "POST", body: indexInput.value.trim() ? { index: indexInput.value.trim() } : {} });
+                        checkBox.append(h("div", { class: "pre", text: `${plan.from} → ${plan.to}\n${plan.artifacts.map((a) => `${a.name} · ${a.sha256.slice(0, 12)}…`).join("\n")}\n${plan.notes ?? ""}` }));
+                      } catch (err) {
+                        toast(`计划失败：${err.message}`, true);
+                      }
+                    },
+                  }),
+                ]),
+              );
+              render();
+            } catch (err) {
+              toast(`检查失败：${err.message}`, true);
+            }
+          },
+        }),
+      ]),
+      checkBox,
+    ]),
+  );
+}
+
 const VIEWS = {
   overview: viewOverview,
   hosts: viewHosts,
@@ -761,6 +871,7 @@ const VIEWS = {
   rules: viewRules,
   workflows: viewWorkflows,
   jobs: viewJobs,
+  ops: viewOps,
   audit: viewAudit,
 };
 

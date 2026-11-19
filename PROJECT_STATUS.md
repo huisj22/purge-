@@ -15,6 +15,7 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 | --- | --- |
 | `node --test \"tests/**/*.test.ts\"` | `tests 106 / pass 106 / fail 0` |
 | `npx tsc --noEmit` | exit 0（0 类型错误，typescript 5.9.3） |
+| `node scripts/acceptance.ts` | **14/14 项通过**（health→宿主→诊断→pack 全生命周期→规则/技能→插件→快照→更新→工作流→审计链） |
 | `node src/cli/main.ts doctor` | `审计链 ✓ 完整`、`宿主 1 个：dsh@24d1d554`、exit 0 |
 | `node src/cli/main.ts host inspect dsh@24d1d554` | `@deepseek-ai/dsh-desktop@0.2.2-rc.5（verified）· 磁盘 both · 进程 running · 加载 unpacked · 修改痕迹 已修改` |
 | `node src/cli/main.ts diagnose` | `WARN · 通过 7 / 警告 3 / 失败 0`（修复了官方 bundle 误报后） |
@@ -45,6 +46,7 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 | 调度（interval + cron-lite + 互斥 + 持久化） | `src/scheduler/*` | `scheduler` |
 | 策略（风险评分/allow-confirm-deny/AI 不降级） | `src/security/policy.ts` | `policy` |
 | 规则中心（多槽位 + 组装） | `src/ruleskills/rules.ts` | `ruleskills` |
+| 配置中心（哈希守卫 + 行级 diff + 历史） | `src/configcenter/managed.ts` | `configcenter` |
 | 技能中心（围栏导入 + 备份 + 安全提示） | `src/ruleskills/skills.ts` | `ruleskills` |
 | 插件宿主（清单/能力白名单/健康/私有存储） | `src/plugins/host.ts` | `plugins` |
 | 更新中心（离线索引/stage/activate） | `src/update/*` | `update` |
@@ -54,7 +56,7 @@ Phase 0/1/2 完成，Phase 3 的继承项与 Phase 4–7 的核心能力已落�
 
 ## 进行中
 
-- 配置中心的多目标 diff / 冲突预演（T-023）、端到端验收脚本（T-022）
+- 安装器 `install --verify-first`（v0.2）、镜像/代理传输、归档换包（v0.3）、UI 可访问性审计
 
 ## 已知问题
 
