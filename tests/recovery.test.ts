@@ -42,7 +42,7 @@ describe("snapshot store", () => {
     await rm(path.join(sub, "b.txt"));
     await writeFile(absent, "now exists", "utf8");
 
-    const r = await store.restore(snap.snapId);
+    const r = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.deepEqual(r.failed, []);
     assert.equal(await readFile(file, "utf8"), "original");
     assert.equal(await readFile(path.join(sub, "b.txt"), "utf8"), "nested");

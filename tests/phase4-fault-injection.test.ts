@@ -76,7 +76,7 @@ describe("C1 file operation faults", () => {
     await writeFile(a, "A1", "utf8");
     await rm(bDir, { recursive: true, force: true });
     await writeFile(bDir, "blocker", "utf8");
-    const res = await store.restore(snap.snapId);
+    const res = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.ok(res.failed.length > 0);
     assert.equal(res.rolledBack, true);
     assert.equal(await readFile(a, "utf8"), "A1");
@@ -152,8 +152,8 @@ describe("C3 recovery faults", () => {
     await writeFile(f, "v0", "utf8");
     const snap = await store.capture("x", [f]);
     await writeFile(f, "v1", "utf8");
-    await store.restore(snap.snapId);
-    await store.restore(snap.snapId);
+    await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
+    await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.equal(await readFile(f, "utf8"), "v0");
     db.close();
   });
@@ -165,7 +165,7 @@ describe("C3 recovery faults", () => {
     await writeFile(f, "v0", "utf8");
     const snap = await store.capture("x", [f]);
     await writeFile(f, "v1", "utf8");
-    const [r1, r2] = await Promise.all([store.restore(snap.snapId), store.restore(snap.snapId)]);
+    const [r1, r2] = await Promise.all([store.restore(snap.snapId, { policy: "force", authorizedBy: "test" }), store.restore(snap.snapId, { policy: "force", authorizedBy: "test" })]);
     assert.equal(r1.failed.length, 0);
     assert.equal(r2.failed.length, 0);
     assert.equal(await readFile(f, "utf8"), "v0");
@@ -182,7 +182,7 @@ describe("C3 recovery faults", () => {
     assert.ok(entry?.hash);
     await writeFile(store.objectPath(entry.hash), "corrupted", "utf8");
     await writeFile(f, "v1", "utf8");
-    const res = await store.restore(snap.snapId);
+    const res = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.ok(res.failed.length > 0);
     assert.equal(await readFile(f, "utf8"), "v1", "损坏的快照不能破坏当前文件");
     db.close();
@@ -195,7 +195,7 @@ describe("C3 recovery faults", () => {
     const snap = await store.capture("x", [missing]);
     assert.ok(snap.manifest.entries.some((e) => e.type === "absent"));
     await writeFile(missing, "created later", "utf8");
-    const res = await store.restore(snap.snapId);
+    const res = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.equal(res.failed.length, 0);
     await assert.rejects(() => stat(missing));
     db.close();

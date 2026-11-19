@@ -144,7 +144,11 @@ export class Transaction {
   async rollback(): Promise<TxResult> {
     if (this.#state === "committed") throw purgeError("invalid_argument", "cannot rollback a committed transaction");
     if (this.#state === "rolled_back") return this.result();
-    const rollback = await this.#snapshots.restore(this.#snapshotId);
+    const rollback = await this.#snapshots.restore(this.#snapshotId, {
+      policy: "force",
+      authorizedBy: `transaction:${this.#actor}`,
+      reason: `rollback of ${this.txId} (${this.label})`,
+    });
     // 快照之前不存在的路径，restore 已按 absent 处理；这里再兜底清理事务新建的文件
     for (const change of this.#changes) {
       if (change.action !== "mkdir") continue;

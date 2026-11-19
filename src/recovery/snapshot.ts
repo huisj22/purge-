@@ -10,6 +10,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWriteFile, ensureDir, sha256 } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import type { Database } from "../storage/database.ts";
 
 export const INLINE_LIMIT = 32 * 1024;
@@ -45,7 +46,47 @@ export interface RestoreResult {
   preSnapshotId?: string;
   /** 回滚本身失败时的明细（此时现场需要人工介入）。 */
   rollbackFailed?: Array<{ path: string; error: string }>;
+  /** 强制恢复时记录的覆盖信息（P2-08）。 */
+  force?: { authorizedBy: string; reason?: string; overwritten: Array<{ path: string; fromHash: string; toHash: string }> };
 }
+
+/** 恢复前的逐文件冲突状态（P2-08）。 */
+export type RestoreEntryStatus = "UNCHANGED" | "MODIFIED" | "NEWER" | "DELETED" | "UNKNOWN" | "CORRUPTED";
+
+export interface RestorePlanEntry {
+  path: string;
+  status: RestoreEntryStatus;
+  /** 快照中的内容哈希（absent 条目为 null）。 */
+  snapshotHash: string | null;
+  /** 当前磁盘内容哈希（不存在为 null）。 */
+  currentHash: string | null;
+  /** 恢复后要执行的动作。 */
+  action: "restore" | "delete" | "noop";
+  reason?: string;
+}
+
+export interface RestorePlan {
+  snapId: string;
+  label: string;
+  snapshotCreatedMs: number;
+  entries: RestorePlanEntry[];
+  counts: Record<RestoreEntryStatus, number>;
+  /** 默认会被阻止的状态数量（MODIFIED/NEWER/CORRUPTED/UNKNOWN）。 */
+  conflicts: number;
+  /** 是否存在需要人工确认的项。 */
+  blocked: boolean;
+}
+
+export interface RestoreOptions {
+  /** 默认 block：存在冲突即拒绝；force：需 authorizedBy。 */
+  policy?: "block" | "force";
+  authorizedBy?: string;
+  reason?: string;
+  /** 测试/审计用：在 plan 完成后、真正写盘前插入一次复检（TOCTOU 防护验证）。 */
+  onBeforeApply?: () => Promise<void>;
+}
+
+const BLOCKING_STATUSES: RestoreEntryStatus[] = ["MODIFIED", "NEWER", "CORRUPTED", "UNKNOWN"];
 
 interface SnapshotRow {
   snap_id: string;
@@ -135,6 +176,13 @@ export class SnapshotStore {
   }
 
   async capture(label: string, targets: string[]): Promise<SnapshotRecord> {
+    // 跨进程互斥（T-037）：capture 也串行，避免两个进程同时写同一对象目录
+    return withWriteGuard(this.dataDir, { resource: "snapshot", scope: "snapshot", operation: "snapshot.capture" }, () =>
+      this.#captureLocked(label, targets),
+    );
+  }
+
+  async #captureLocked(label: string, targets: string[]): Promise<SnapshotRecord> {
     const snapId = `snap-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const entries: SnapshotEntry[] = [];
     const seen = new Set<string>();
@@ -241,24 +289,151 @@ export class SnapshotStore {
    *       ④ 全成功 → rolledBack=false。
    * 并发：同一 store 内的 restore 串行执行（P2-09）。
    */
-  async restore(snapId: string): Promise<RestoreResult> {
-    return this.#withRestoreLock(async () => {
-      const rec = this.get(snapId);
-      const targets = rec.manifest.entries.map((e) => e.path);
-      const pre = await this.capture(`pre-restore:${snapId}`, targets);
-      const attempt = await this.#applyEntries(rec);
-      if (attempt.failed.length === 0) {
-        return { ...attempt, rolledBack: false, preSnapshotId: pre.snapId };
+  /**
+   * 只读恢复预演（P2-08）：不改磁盘，逐文件给出 UNCHANGED/MODIFIED/NEWER/DELETED/UNKNOWN/CORRUPTED。
+   * 冲突默认阻止；调用方必须显式 force 并给出授权人才能覆盖。
+   */
+  async planRestore(snapId: string): Promise<RestorePlan> {
+    const rec = this.get(snapId);
+    const entries: RestorePlanEntry[] = [];
+    const counts: Record<RestoreEntryStatus, number> = {
+      UNCHANGED: 0,
+      MODIFIED: 0,
+      NEWER: 0,
+      DELETED: 0,
+      UNKNOWN: 0,
+      CORRUPTED: 0,
+    };
+    for (const entry of rec.manifest.entries) {
+      const planned = await this.#planEntry(entry, rec.createdMs);
+      counts[planned.status] += 1;
+      entries.push(planned);
+    }
+    const conflicts = BLOCKING_STATUSES.reduce((n, s) => n + counts[s], 0);
+    return {
+      snapId,
+      label: rec.label,
+      snapshotCreatedMs: rec.createdMs,
+      entries,
+      counts,
+      conflicts,
+      blocked: conflicts > 0,
+    };
+  }
+
+  async #planEntry(entry: SnapshotEntry, snapshotCreatedMs: number): Promise<RestorePlanEntry> {
+    // absent：快照时刻这个路径不存在 → 恢复时应当删除
+    if (entry.type === "absent") {
+      const exists = await fsp
+        .stat(entry.path)
+        .then(() => true)
+        .catch(() => false);
+      return exists
+        ? { path: entry.path, status: "MODIFIED", snapshotHash: null, currentHash: null, action: "delete", reason: "快照时不存在，当前存在（恢复将删除）" }
+        : { path: entry.path, status: "UNCHANGED", snapshotHash: null, currentHash: null, action: "noop" };
+    }
+    if (entry.type === "dir") {
+      return { path: entry.path, status: "UNCHANGED", snapshotHash: null, currentHash: null, action: "noop", reason: "目录条目" };
+    }
+    // 快照自身是否可读（对象/内联）
+    if (entry.hash) {
+      try {
+        if (entry.inline !== undefined) {
+          const inlineHash = sha256(Buffer.from(entry.inline, "base64"));
+          if (inlineHash !== entry.hash) {
+            return { path: entry.path, status: "CORRUPTED", snapshotHash: entry.hash, currentHash: null, action: "noop", reason: "快照内联内容哈希不符" };
+          }
+        } else {
+          await this.getObject(entry.hash);
+        }
+      } catch (err) {
+        return { path: entry.path, status: "CORRUPTED", snapshotHash: entry.hash, currentHash: null, action: "noop", reason: `快照内容不可用：${asPurgeError(err).message}` };
       }
-      // 回滚：把刚才被改动的目标恢复成"恢复前"的样子
-      const rollback = await this.#applyEntries(this.get(pre.snapId));
-      return {
-        ...attempt,
-        rolledBack: rollback.failed.length === 0,
-        preSnapshotId: pre.snapId,
-        rollbackFailed: rollback.failed,
-      };
-    });
+    }
+    let buf: Buffer;
+    try {
+      buf = await fsp.readFile(entry.path);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return { path: entry.path, status: "DELETED", snapshotHash: entry.hash ?? null, currentHash: null, action: "restore", reason: "文件已被删除" };
+      }
+      return { path: entry.path, status: "UNKNOWN", snapshotHash: entry.hash ?? null, currentHash: null, action: "noop", reason: `无法读取当前文件：${(err as Error).message}` };
+    }
+    const currentHash = sha256(buf);
+    if (entry.hash && currentHash === entry.hash) {
+      return { path: entry.path, status: "UNCHANGED", snapshotHash: entry.hash, currentHash, action: "noop" };
+    }
+    const st = await fsp.stat(entry.path).catch(() => null);
+    const newer = st ? st.mtimeMs > snapshotCreatedMs : false;
+    return {
+      path: entry.path,
+      status: newer ? "NEWER" : "MODIFIED",
+      snapshotHash: entry.hash ?? null,
+      currentHash,
+      action: "restore",
+      reason: newer ? "当前文件比快照更新" : "当前文件内容与快照不同",
+    };
+  }
+
+  /**
+   * 恢复快照（事务化 + 冲突检测）。
+   *
+   * 协议：① 预演冲突 → ② 有冲突且非 force 则拒绝 → ③ 拍 pre-restore 快照 →
+   *       ④ 复检（TOCTOU）→ ⑤ 逐条应用 → ⑥ 失败则回滚并验证回滚结果。
+   */
+  async restore(snapId: string, opts: RestoreOptions = {}): Promise<RestoreResult> {
+    return withWriteGuard(this.dataDir, { resource: "snapshot", scope: "snapshot", operation: "snapshot.restore" }, () =>
+      this.#withRestoreLock(async () => {
+        const plan = await this.planRestore(snapId);
+        if (plan.blocked && opts.policy !== "force") {
+          throw purgeError("conflict", `restore blocked: ${plan.conflicts} conflicting entries`, {
+            snapId,
+            plan,
+            hint: "确认要用快照覆盖当前内容时，使用 policy=force 并给出 authorizedBy",
+          });
+        }
+        if (opts.policy === "force" && (!opts.authorizedBy || opts.authorizedBy.trim().length === 0)) {
+          throw purgeError("policy_denied", "force restore requires authorizedBy", { snapId, plan });
+        }
+        const rec = this.get(snapId);
+        const targets = rec.manifest.entries.map((e) => e.path);
+        const pre = await this.capture(`pre-restore:${snapId}`, targets);
+
+        if (opts.onBeforeApply) await opts.onBeforeApply();
+
+        // TOCTOU：拍完保护快照、开始写盘前再算一次，防止"预演之后文件又变了"
+        const recheck = await this.planRestore(snapId);
+        if (recheck.blocked && opts.policy !== "force") {
+          throw purgeError("conflict", `restore aborted: state changed between plan and apply (${recheck.conflicts} conflicts)`, {
+            snapId,
+            plan: recheck,
+            preSnapshotId: pre.snapId,
+          });
+        }
+
+        const overwritten = recheck.entries
+          .filter((e) => e.status !== "UNCHANGED" && e.currentHash)
+          .map((e) => ({ path: e.path, fromHash: e.currentHash as string, toHash: e.snapshotHash ?? "(deleted)" }));
+
+        const attempt = await this.#applyEntries(rec);
+        const base: RestoreResult = attempt.failed.length === 0
+          ? { ...attempt, rolledBack: false, preSnapshotId: pre.snapId }
+          : {
+              ...attempt,
+              rolledBack: (await this.#applyEntries(this.get(pre.snapId))).failed.length === 0,
+              preSnapshotId: pre.snapId,
+            };
+        if (opts.policy === "force") {
+          base.force = {
+            authorizedBy: opts.authorizedBy as string,
+            ...(opts.reason ? { reason: opts.reason } : {}),
+            overwritten,
+          };
+        }
+        return base;
+      }),
+    );
   }
 
   async #applyEntries(rec: SnapshotRecord): Promise<{ restored: string[]; removed: string[]; failed: Array<{ path: string; error: string }> }> {

@@ -56,7 +56,11 @@ export const CONFIG_SCHEMA: Schema = {
   plugins: {
     kind: "object",
     optional: true,
-    fields: { enabled: { kind: "boolean", optional: true, default: true } },
+    fields: {
+      enabled: { kind: "boolean", optional: true, default: true },
+      /** in-process（默认）或 process（独立子进程，T-036） */
+      isolation: { kind: "string", optional: true, default: "in-process", enum: ["in-process", "process"] },
+    },
   },
 };
 
@@ -70,7 +74,7 @@ export interface PurgeConfig {
   scheduler: { maxConcurrent: number; tickMs: number };
   inspector: { timeoutMs: number };
   update: { indexUrl: string; channel: string };
-  plugins: { enabled: boolean };
+  plugins: { enabled: boolean; isolation: "in-process" | "process" };
 }
 
 export interface ConfigHistoryEntry {

@@ -1,16 +1,18 @@
 /**
  * 配置中心：受管文件的读取 / 差异预演 / 冲突检测 / 提交与历史。
  *
- * 不变量（对应 ARCHITECTURE §5.3）：
+ * 不变量：
  * 1. 读取返回内容哈希；提交时必须带上这个哈希。
- * 2. 提交前重新读取；若哈希已变（外部改动）→ conflict，拒绝覆盖。
+ * 2. 提交前重新读取；哈希已变（外部改动）→ conflict，拒绝覆盖。
  * 3. 提交走原子写并在写后回读校验。
  * 4. 每次成功提交生成一份历史快照（内容寻址），可按 id 取回。
+ * 5. 写操作持有跨进程锁（global → config），同进程内可重入（T-037）。
  */
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWriteFile, ensureDir, readJson, sha256 } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 
 export interface ManagedFile {
   path: string;
@@ -83,53 +85,43 @@ export class ConfigCenter {
    */
   async commit(filePath: string, nextContent: string, opts: { expectHash?: string; actor?: string } = {}): Promise<ConfigVersion> {
     const abs = path.resolve(filePath);
-    // P2-02：同一路径的提交串行化，避免两个客户端"都读到旧 hash 然后都写成功"。
-    return this.#withLock(abs, async () => {
-      const current = await this.read(abs);
-      if (opts.expectHash !== undefined && opts.expectHash !== current.hash) {
-        throw purgeError("conflict", `external modification detected for ${abs}`, {
-          expected: opts.expectHash,
-          actual: current.hash,
-          hint: "重新读取后再提交",
-        });
-      }
-      const nextHash = sha256(nextContent);
-      try {
-        await atomicWriteFile(abs, nextContent);
-      } catch (err) {
-        throw asPurgeError(err);
-      }
-      const after = await this.read(abs);
-      if (after.hash !== nextHash) {
-        throw purgeError("conflict", `concurrent modification detected for ${abs}`, {
-          expected: nextHash,
-          actual: after.hash,
-          hint: "另一个写入者先提交了；重新读取后再提交",
-        });
-      }
-      try {
-        return await this.#record(abs, nextContent, after.hash, opts.actor ?? "system", current);
-      } catch (err) {
-        // P3-13：记录失败时把文件恢复成提交前内容，避免"文件已改但无历史"
-        await atomicWriteFile(abs, current.content).catch(() => {});
-        throw purgeError("unwritable", `failed to record config history for ${abs}; file restored`, {
-          cause: asPurgeError(err).message,
-        });
-      }
-    });
+    return withWriteGuard(this.dataDir, { resource: "config", scope: "config", operation: "config.commit" }, () =>
+      this.#commitLocked(abs, nextContent, opts),
+    );
   }
 
-  readonly #locks = new Map<string, Promise<unknown>>();
-
-  /** 按路径串行化（进程内）。跨进程仍未互斥，见报告中的限制说明。 */
-  #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.#locks.get(key) ?? Promise.resolve();
-    const run = prev.then(fn, fn);
-    this.#locks.set(key, run.then(
-      () => undefined,
-      () => undefined,
-    ));
-    return run;
+  async #commitLocked(abs: string, nextContent: string, opts: { expectHash?: string; actor?: string }): Promise<ConfigVersion> {
+    const current = await this.read(abs);
+    if (opts.expectHash !== undefined && opts.expectHash !== current.hash) {
+      throw purgeError("conflict", `external modification detected for ${abs}`, {
+        expected: opts.expectHash,
+        actual: current.hash,
+        hint: "重新读取后再提交",
+      });
+    }
+    const nextHash = sha256(nextContent);
+    try {
+      await atomicWriteFile(abs, nextContent);
+    } catch (err) {
+      throw asPurgeError(err);
+    }
+    const after = await this.read(abs);
+    if (after.hash !== nextHash) {
+      throw purgeError("conflict", `concurrent modification detected for ${abs}`, {
+        expected: nextHash,
+        actual: after.hash,
+        hint: "另一个写入者先提交了；重新读取后再提交",
+      });
+    }
+    try {
+      return await this.#record(abs, nextContent, after.hash, opts.actor ?? "system", current);
+    } catch (err) {
+      // 记录失败时把文件恢复成提交前内容，避免"文件已改但无历史"
+      await atomicWriteFile(abs, current.content).catch(() => {});
+      throw purgeError("unwritable", `failed to record config history for ${abs}; file restored`, {
+        cause: asPurgeError(err).message,
+      });
+    }
   }
 
   async history(filePath?: string): Promise<ConfigVersion[]> {
@@ -147,7 +139,6 @@ export class ConfigCenter {
         const parsed = JSON.parse(buf.toString("utf8")) as { content: string; hash: string; size: number };
         out.push({ path: entry.path, exists: true, hash: parsed.hash, size: parsed.size, mtimeMs: Date.parse(entry.savedAt), content: parsed.content });
       } catch {
-        // 历史损坏不隐藏，用空内容 + 原哈希占位，配合 verify 提示
         out.push({ path: entry.path, exists: false, hash: entry.hash, size: entry.size, mtimeMs: Date.parse(entry.savedAt), content: "" });
       }
     }
@@ -232,7 +223,7 @@ export function diffText(filePath: string, before: string, after: string, before
 function computeLcs(a: string[], b: string[]): string[] {
   const n = a.length;
   const m = b.length;
-  // 大文件退化保护：超过 2000 行改用前缀/后缀裁剪后的简化匹配，避免 O(n*m) 爆炸
+  // 大文件退化保护：超过 4M 组合改用前后缀裁剪，避免 O(n*m) 爆炸
   if (n * m > 4_000_000) {
     const out: string[] = [];
     let start = 0;

@@ -3,7 +3,7 @@
  * 每个 describe 对应 ISSUE_REGISTER 中的一条。
  */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -136,7 +136,7 @@ describe("P1-03: restore must not leave a half-restored tree", () => {
     await rm(bDir, { recursive: true, force: true });
     await writeFile(bDir, "blocker", "utf8");
 
-    const result = await store.restore(snap.snapId);
+    const result = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.ok(result.failed.length > 0, "必须报告失败");
     assert.equal(result.rolledBack, true, "失败后必须回滚到恢复前状态");
     assert.equal(await readFile(a, "utf8"), "A1", "a.txt 必须回到恢复前内容，而不是快照内容");
@@ -150,7 +150,7 @@ describe("P1-03: restore must not leave a half-restored tree", () => {
     await writeFile(f, "v0", "utf8");
     const snap = await store.capture("ok", [f]);
     await writeFile(f, "v1", "utf8");
-    const result = await store.restore(snap.snapId);
+    const result = await store.restore(snap.snapId, { policy: "force", authorizedBy: "test" });
     assert.equal(result.failed.length, 0);
     assert.equal(await readFile(f, "utf8"), "v0");
     assert.equal(result.rolledBack, false);

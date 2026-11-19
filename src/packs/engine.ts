@@ -12,8 +12,9 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWriteFile } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import type { Transaction } from "../recovery/transaction.ts";
-import type { SnapshotStore } from "../recovery/snapshot.ts";
+import type { RestoreResult, SnapshotStore } from "../recovery/snapshot.ts";
 import { applyRuleToText, describeEvaluation, evaluateRule, type RuleFileStatus } from "./matcher.ts";
 import { validatePack, type Pack, type PackRule } from "./schema.ts";
 
@@ -47,6 +48,8 @@ export interface PackApplyResult {
 
 export interface PackEngineOptions {
   snapshots: SnapshotStore;
+  /** 数据目录：提供后 apply 会持有跨进程锁（T-037）。 */
+  dataDir?: string;
   /** 事务工厂：由组合根注入，便于统一审计与测试。 */
   createTransaction: (label: string, targets: string[]) => Promise<Transaction>;
 }
@@ -120,6 +123,13 @@ export class PackEngine {
    * 事务内容 = {文件内容}；校验失败/写入失败 → 整体回滚。
    */
   async apply(pack: Pack, opts: { baseRoot: string; hostVersion: string }): Promise<PackApplyResult> {
+    if (!this.#o.dataDir) return this.#applyLocked(pack, opts);
+    return withWriteGuard(this.#o.dataDir, { resource: "pack", scope: "pack", operation: "pack.apply" }, () =>
+      this.#applyLocked(pack, opts),
+    );
+  }
+
+  async #applyLocked(pack: Pack, opts: { baseRoot: string; hostVersion: string }): Promise<PackApplyResult> {
     const plan = await this.plan(pack, opts);
     const pending = plan.entries.filter((e) => e.status === "pending");
     if (pending.length === 0) {
@@ -161,8 +171,13 @@ export class PackEngine {
   }
 
   /** 用快照恢复（推荐的回退路径）。 */
-  async revert(snapshotId: string): Promise<{ restored: string[]; removed: string[]; failed: Array<{ path: string; error: string }> }> {
-    return this.#o.snapshots.restore(snapshotId);
+  async revert(snapshotId: string, opts: { authorizedBy?: string; reason?: string } = {}): Promise<RestoreResult> {
+    // 回退修改包属于显式撤销：force + 授权人 + 理由，全部进入返回结果可审计
+    return this.#o.snapshots.restore(snapshotId, {
+      policy: "force",
+      authorizedBy: opts.authorizedBy ?? "pack-engine",
+      reason: opts.reason ?? "revert modification pack",
+    });
   }
 }
 

@@ -14,6 +14,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { atomicWriteFile, ensureDir, readJson, removeTreeNoFollow, sha256File } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import type { Logger } from "../core/logger.ts";
 
 export const PLUGIN_API_VERSION = "1";
@@ -72,6 +73,8 @@ export interface InstalledPlugin {
 
 export interface PluginHostOptions {
   dataDir: string;
+  /** in-process（默认）或 process（独立子进程，T-036）。 */
+  isolation?: "in-process" | "process";
   logger: Logger;
   /** 服务解析器：能力名 → 服务实例。由组合根注入（通常是 kernel.get）。 */
   resolveService: (name: string) => unknown;
@@ -85,12 +88,15 @@ const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export class PluginHost {
   readonly dir: string;
+  readonly dataDir: string;
   readonly stateFile: string;
   readonly #o: PluginHostOptions;
   readonly #instances = new Map<string, PluginInstance>();
+  readonly #workers = new Map<string, import("./isolated-host.ts").IsolatedPluginWorker>();
 
   constructor(opts: PluginHostOptions) {
     this.#o = opts;
+    this.dataDir = opts.dataDir;
     this.dir = path.join(opts.dataDir, "plugins");
     this.stateFile = path.join(opts.dataDir, "plugin-state.json");
   }
@@ -129,6 +135,10 @@ export class PluginHost {
   }
 
   async install(sourceDir: string, opts: { overwrite?: boolean } = {}): Promise<InstalledPlugin> {
+    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.install" }, () => this.#installLocked(sourceDir, opts));
+  }
+
+  async #installLocked(sourceDir: string, opts: { overwrite?: boolean }): Promise<InstalledPlugin> {
     const src = path.resolve(sourceDir);
     const manifest = await this.#readManifest(path.join(src, "plugin.json"));
     const dest = path.join(this.dir, `${manifest.name}@${manifest.version}`);
@@ -163,6 +173,43 @@ export class PluginHost {
 
   async enable(name: string, opts: { trusted?: boolean } = {}): Promise<InstalledPlugin> {
     const plugin = await this.#find(name);
+    if (this.#o.isolation === "process") {
+      // 进程隔离模式（T-036）：插件跑在独立子进程，能力调用由 Host 审批
+      if (plugin.manifest.privilege === "host" && opts.trusted !== true) {
+        throw purgeError("policy_denied", `plugin ${name} runs with host privileges and needs explicit trust`, { privilege: plugin.manifest.privilege });
+      }
+      const { IsolatedPluginWorker } = await import("./isolated-host.ts");
+      const worker = new IsolatedPluginWorker({
+        manifest: plugin.manifest,
+        pluginDir: plugin.dir,
+        logger: this.#o.logger,
+        capabilityResolver: (service, capabilityMethod) => {
+          if (!plugin.manifest.capabilities.includes(service)) return { allow: false, reason: `capability ${service} not declared` };
+          const svc = this.#o.resolveService(service) as Record<string, unknown> | undefined;
+          return {
+            allow: true,
+            invoke: (...args: unknown[]) => {
+              // 只允许调用服务上真实存在的方法，避免任意属性透传
+              if (!svc) throw new Error(`service ${service} is not available`);
+              const method = String(capabilityMethod);
+              const fn = (svc as Record<string, unknown>)[method];
+              if (typeof fn !== "function") throw new Error(`service ${service} has no method ${method}`);
+              return (fn as (...a: unknown[]) => unknown).apply(svc, args);
+            },
+          };
+        },
+      });
+      await worker.start();
+      this.#workers.set(name, worker);
+      const state = await this.#state();
+      const record = state.plugins.find((p) => p.name === name);
+      if (record) {
+        record.state = "enabled";
+        record.enabled = true;
+      }
+      await this.#saveState(state);
+      return { ...plugin, state: "enabled" };
+    }
     // P1-04：host 特权插件必须显式信任；这不是沙箱，只是让用户明确知道后果。
     if (plugin.manifest.privilege === "host" && opts.trusted !== true) {
       throw purgeError("policy_denied", `plugin ${name} runs with host privileges and needs explicit trust`, {
@@ -183,6 +230,11 @@ export class PluginHost {
   }
 
   async disable(name: string): Promise<InstalledPlugin> {
+    const worker = this.#workers.get(name);
+    if (worker) {
+      await worker.stop();
+      this.#workers.delete(name);
+    }
     const instance = this.#instances.get(name);
     if (instance?.deactivate) {
       try {
@@ -206,6 +258,13 @@ export class PluginHost {
   async health(name: string, opts: { timeoutMs?: number } = {}): Promise<{ ok: boolean; state: PluginState; detail?: string }> {
     const plugin = await this.#find(name);
     if (plugin.state !== "enabled") return { ok: false, state: plugin.state, detail: "插件未启用" };
+    const workerFirst = this.#workers.get(name);
+    if (workerFirst) {
+      const r = await workerFirst.request("health");
+      if (!r.ok) return { ok: false, state: "broken", detail: r.error };
+      const value = r.value as { ok?: boolean; detail?: string } | undefined;
+      return { ok: value?.ok !== false, state: "enabled", detail: value?.detail ?? "worker health ok" };
+    }
     const instance = this.#instances.get(name);
     if (!instance) {
       try {
@@ -213,6 +272,13 @@ export class PluginHost {
       } catch (err) {
         return { ok: false, state: "broken", detail: asPurgeError(err).message };
       }
+    }
+    const worker = this.#workers.get(name);
+    if (worker) {
+      const r = await worker.request("health");
+      if (!r.ok) return { ok: false, state: worker.state === "TIMEOUT" ? "broken" : "broken", detail: r.error };
+      const value = r.value as { ok?: boolean; detail?: string } | undefined;
+      return { ok: value?.ok !== false, state: "enabled", detail: value?.detail ?? "worker health ok" };
     }
     const inst = this.#instances.get(name);
     if (!inst?.health) return { ok: true, state: "enabled", detail: "未实现 health()，视为已加载" };
@@ -233,11 +299,21 @@ export class PluginHost {
       instance = await this.#load(plugin);
       this.#instances.set(name, instance);
     }
+    const worker = this.#workers.get(name);
+    if (worker) {
+      const r = await worker.request("invoke", { method, args }, );
+      if (!r.ok) throw purgeError(r.state === "TIMEOUT" ? "timeout" : "internal", r.error ?? "worker invoke failed");
+      return r.value;
+    }
     if (!instance.invoke) throw purgeError("unsupported", `plugin ${name} does not export invoke()`);
     return withPluginTimeout(Promise.resolve(instance.invoke(method, args)), opts.timeoutMs ?? 5000, `invoke ${name}.${method}`);
   }
 
   async remove(name: string): Promise<{ removed: string }> {
+    return withWriteGuard(this.dataDir, { resource: "plugin", scope: "plugin", operation: "plugin.remove" }, () => this.#removeLocked(name));
+  }
+
+  async #removeLocked(name: string): Promise<{ removed: string }> {
     const plugin = await this.#find(name);
     if (plugin.state === "enabled") await this.disable(name);
     await removeTreeNoFollow(plugin.dir);

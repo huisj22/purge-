@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { atomicWriteFile, ensureDir, readJson, sha256, removeTreeNoFollow } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
 import type { Logger } from "../core/logger.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import { compareVersions, isNewer } from "./version.ts";
 
 export interface ReleaseArtifact {
@@ -164,6 +165,11 @@ export class UpdateService {
 
   /** 把 staging 提升为活跃版本；返回新的指针内容。 */
   async activate(staged: StagedResult): Promise<{ version: string; dir: string; previous?: string; backupDir?: string }> {
+    // 跨进程互斥（T-037）
+    return withWriteGuard(this.#o.dataDir, { resource: "update", scope: "update", operation: "update.activate" }, () => this.#activateLocked(staged));
+  }
+
+  async #activateLocked(staged: StagedResult): Promise<{ version: string; dir: string; previous?: string; backupDir?: string }> {
     const targetDir = path.join(this.dir, "versions", staged.version);
     await ensureDir(path.dirname(targetDir));
     let backupDir: string | undefined;

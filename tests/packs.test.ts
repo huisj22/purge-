@@ -210,7 +210,7 @@ describe("pack engine", () => {
   });
 
   it("refuses paths outside the base root", async () => {
-    const { e, db } = engine();
+    const { db } = engine();
     const pack = makePack({
       rules: [{ id: "r", layer: "code", path: "../escape.js", markers: ["[x]"], replacements: [{ pattern: "a", replace: "b[x]" }] }],
     });
