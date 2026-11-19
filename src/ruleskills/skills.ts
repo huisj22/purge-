@@ -12,6 +12,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { ensureDir, removeTreeNoFollow, sha256File } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import { boolField, listField, parseFrontmatter, stringField } from "./frontmatter.ts";
 
 export interface SkillWarning {
@@ -48,11 +49,13 @@ const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EXECUTABLE = /\.(sh|bash|zsh|ps1|bat|cmd|exe|dll|so|dylib|py|rb|pl)$/i;
 
 export class SkillLibrary {
+  readonly dataDir: string;
   readonly dir: string;
   readonly backupDir: string;
   readonly #o: Required<SkillLibraryOptions>;
 
   constructor(dataDir: string, opts: SkillLibraryOptions = {}) {
+    this.dataDir = dataDir;
     this.dir = path.join(dataDir, "skills");
     this.backupDir = path.join(dataDir, "skills-backup");
     this.#o = {
@@ -148,6 +151,10 @@ export class SkillLibrary {
 
   /** 导入：路径围栏 + 体积上限 + 覆盖前内容寻址备份。 */
   async import(sourceDir: string, opts: { overwrite?: boolean } = {}): Promise<Skill> {
+    return withWriteGuard(this.dataDir, { resource: "skills", scope: "config", operation: "skill.import" }, () => this.#importLocked(sourceDir, opts));
+  }
+
+  async #importLocked(sourceDir: string, opts: { overwrite?: boolean }): Promise<Skill> {
     const src = path.resolve(sourceDir);
     const skill = await this.inspect(src);
     const dest = path.join(this.dir, skill.name);
@@ -181,6 +188,10 @@ export class SkillLibrary {
   }
 
   async remove(name: string): Promise<{ removed: string }> {
+    return withWriteGuard(this.dataDir, { resource: "skills", scope: "config", operation: "skill.remove" }, () => this.#removeLocked(name));
+  }
+
+  async #removeLocked(name: string): Promise<{ removed: string }> {
     if (!NAME_RE.test(name)) throw purgeError("invalid_argument", `invalid skill name: ${name}`);
     const dir = path.join(this.dir, name);
     const exists = await fsp.stat(dir).then((s) => s.isDirectory()).catch(() => false);

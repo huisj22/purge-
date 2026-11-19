@@ -10,6 +10,7 @@
 import * as path from "node:path";
 import { atomicWriteFile, readJson } from "./atomic.ts";
 import { purgeError } from "./errors.ts";
+import { withWriteGuard } from "./lock.ts";
 import { type Schema, validateSchema } from "./schema.ts";
 
 export const CONFIG_SCHEMA: Schema = {
@@ -111,6 +112,10 @@ export class ConfigStore {
 
   /** 变更配置；patch 为深合并的对象。校验失败抛 schema_invalid，不落盘。 */
   async update(patch: Record<string, unknown>): Promise<PurgeConfig> {
+    return withWriteGuard(this.dataDir, { resource: "setting", scope: "config", operation: "config.update" }, () => this.#updateLocked(patch));
+  }
+
+  async #updateLocked(patch: Record<string, unknown>): Promise<PurgeConfig> {
     const base = this.#current ?? (await this.load());
     const merged = deepMerge(this.#raw, patch);
     // 1) 先纯校验（不改变任何状态）

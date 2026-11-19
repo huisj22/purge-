@@ -79,16 +79,44 @@ export class AuditLog {
     const risk = input.risk ?? 0;
     const detailObj = input.detail === undefined ? null : redact(input.detail);
     const detail = detailObj === null ? null : JSON.stringify(detailObj);
-    const last = this.db.raw.prepare("SELECT seq, hash FROM audit ORDER BY seq DESC LIMIT 1").get() as
-      | { seq: number; hash: string }
-      | undefined;
-    const seq = (last?.seq ?? 0) + 1;
-    const prevHash = last?.hash ?? GENESIS_HASH;
-    const hash = computeAuditHash({ prevHash, seq, ts, actor: input.actor, action: input.action, target, risk, detail });
-    this.db.raw
-      .prepare("INSERT INTO audit(seq,ts,actor,action,target,risk,detail,prev_hash,hash) VALUES(?,?,?,?,?,?,?,?,?)")
-      .run(seq, ts, input.actor, input.action, target, risk, detail, prevHash, hash);
-    return { seq, ts, actor: input.actor, action: input.action, target, risk, detail: detailObj, prevHash, hash };
+    // 跨进程并发安全：seq 的分配必须在**写事务内**完成。
+    // 否则两个进程会读到同一个 last(seq)，并在插入时撞 UNIQUE(audit.seq)。
+    let attempt = 0;
+    for (;;) {
+      try {
+        this.db.raw.exec("BEGIN IMMEDIATE");
+        try {
+          const last = this.db.raw.prepare("SELECT seq, hash FROM audit ORDER BY seq DESC LIMIT 1").get() as
+            | { seq: number; hash: string }
+            | undefined;
+          const seq = (last?.seq ?? 0) + 1;
+          const prevHash = last?.hash ?? GENESIS_HASH;
+          const hash = computeAuditHash({ prevHash, seq, ts, actor: input.actor, action: input.action, target, risk, detail });
+          this.db.raw
+            .prepare("INSERT INTO audit(seq,ts,actor,action,target,risk,detail,prev_hash,hash) VALUES(?,?,?,?,?,?,?,?,?)")
+            .run(seq, ts, input.actor, input.action, target, risk, detail, prevHash, hash);
+          this.db.raw.exec("COMMIT");
+          return { seq, ts, actor: input.actor, action: input.action, target, risk, detail: detailObj, prevHash, hash };
+        } catch (err) {
+          try {
+            this.db.raw.exec("ROLLBACK");
+          } catch {
+            /* 事务可能已结束 */
+          }
+          throw err;
+        }
+      } catch (err) {
+        const message = String((err as Error).message ?? err);
+        const retryable = /SQLITE_BUSY|database is locked/i.test(message);
+        attempt += 1;
+        if (!retryable || attempt > 100) throw err;
+        // 同步自旋等待写锁释放（append 是同步 API）
+        const until = Date.now() + 5;
+        while (Date.now() < until) {
+          /* spin */
+        }
+      }
+    }
   }
 
   list(opts: { limit?: number; action?: string } = {}): AuditEntry[] {

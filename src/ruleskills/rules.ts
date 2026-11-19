@@ -11,6 +11,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { atomicWriteFile, ensureDir } from "../core/atomic.ts";
 import { asPurgeError, purgeError } from "../core/errors.ts";
+import { withWriteGuard } from "../core/lock.ts";
 import { listField, parseFrontmatter, stringField } from "./frontmatter.ts";
 
 export type RuleScope = { kind: "global" } | { kind: "workspace"; path: string };
@@ -41,9 +42,16 @@ const MAX_BODY = 64 * 1024;
 
 export class RuleStore {
   readonly dir: string;
+  readonly dataDir: string;
 
   constructor(dataDir: string) {
+    this.dataDir = dataDir;
     this.dir = path.join(dataDir, "rules");
+  }
+
+  /** 规则写操作统一走跨进程锁（P2-13）：global → config（与配置写入同层）。 */
+  #guarded<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    return withWriteGuard(this.dataDir, { resource: "rules", scope: "config", operation }, fn);
   }
 
   async list(): Promise<Rule[]> {
@@ -79,6 +87,10 @@ export class RuleStore {
   }
 
   async create(input: RuleInput): Promise<Rule> {
+    return this.#guarded("rule.create", () => this.#createLocked(input));
+  }
+
+  async #createLocked(input: RuleInput): Promise<Rule> {
     validateRule(input);
     const existing = (await this.list()).find((r) => r.id === input.id);
     if (existing) throw purgeError("conflict", `rule already exists: ${input.id}`);
@@ -99,6 +111,10 @@ export class RuleStore {
   }
 
   async update(id: string, patch: Partial<Omit<RuleInput, "id">>): Promise<Rule> {
+    return this.#guarded("rule.update", () => this.#updateLocked(id, patch));
+  }
+
+  async #updateLocked(id: string, patch: Partial<Omit<RuleInput, "id">>): Promise<Rule> {
     const current = await this.get(id);
     const next: Rule = {
       ...current,
@@ -116,8 +132,10 @@ export class RuleStore {
   }
 
   async remove(id: string): Promise<void> {
-    await this.get(id);
-    await fsp.rm(path.join(this.dir, `${id}.json`), { force: true });
+    return this.#guarded("rule.remove", async () => {
+      await this.get(id);
+      await fsp.rm(path.join(this.dir, `${id}.json`), { force: true });
+    });
   }
 
   /** 导出为 Markdown（frontmatter + 正文），可被 import 回读。 */

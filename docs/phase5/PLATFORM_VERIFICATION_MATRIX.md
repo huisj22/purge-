@@ -25,3 +25,14 @@
 ## 结论
 
 **只有 Windows 11 的验证是 PLATFORM_VERIFIED。** Linux/macOS 一律 `NOT_VERIFIED`，不得在报告中写成"支持"。
+
+## 收尾轮更新（2026-11-19）
+
+| 能力 | Windows 11 本机 | 隔离副本（Windows） | GitHub Windows | GitHub Ubuntu | GitHub macOS |
+| --- | --- | --- | --- | --- | --- |
+| 全量测试（261） | ✅ | — | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED（无 job） |
+| 安装/卸载 | ✅ | ✅ | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED |
+| pack apply / snapshot / restore / rollback | ✅（副本） | ✅ 17/17 | NOT_VERIFIED | NOT_VERIFIED | NOT_VERIFIED |
+| 真实宿主写入 | ❌ BLOCKED（安全规则） | — | — | — | — |
+
+标记：`LOCAL_WINDOWS_11_VERIFIED` = TRUE；`GITHUB_WINDOWS_RUNNER_VERIFIED` / `GITHUB_UBUNTU_RUNNER_VERIFIED` / `GITHUB_MACOS_RUNNER_VERIFIED` = **NOT_VERIFIED**（推送被 BLOCKED，见 `GITHUB_CI_STATUS.md`）。

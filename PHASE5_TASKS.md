@@ -16,7 +16,7 @@
 | B-06 | 打包 + 自校验 | P0 | done | `scripts/package.mjs`（109 文件 / sha256） |
 | B-07 | 卸载（保留数据） | P1 | done | 2 例 |
 | B-08 | 本地 CI | P0 | done | `scripts/ci.mjs` 8/8 |
-| B-09 | GitHub Actions 配置 | P1 | not_verified | `.github/workflows/ci.yml` 未在 GitHub 执行 |
+| B-09 | GitHub Actions 配置 | P1 | blocked | 无 remote/凭据；见 `docs/phase5/GITHUB_CI_STATUS.md` |
 | B-10 | Lint 落地 | P1 | done | eslint 9 + typescript-eslint，0 error |
 | C-01 | 跨进程锁实现 | P0 | done | `src/core/lock.ts` |
 | C-02 | 锁元数据/状态/层级 | P0 | done | 6 状态 + 5 层级 |
@@ -24,7 +24,7 @@
 | C-04 | 写路径接入 | P0 | done | config/snapshot/plugin/update/pack/install |
 | C-05 | Case A–G 子进程测试 | P0 | done | 11 例通过 |
 | C-06 | 锁诊断（API/CLI） | P2 | done | `/api/locks`、`purgeplus locks` |
-| C-07 | 规则/技能/自身配置加锁 | P2 | todo | P2-13 |
+| C-07 | 规则/技能/自身配置加锁 | P2 | done（PARTIAL：prune/备份GC 未覆盖） | `tests/write-path-locks.test.ts` |
 | D-01 | 恢复预演（planRestore） | P0 | done | 6 状态 |
 | D-02 | 默认阻止 + force 授权 | P0 | done | 9 例 |
 | D-03 | TOCTOU 复检 | P0 | done | 专项用例 |
@@ -46,3 +46,16 @@
 | G-04 | 平台矩阵 | P1 | done | `PLATFORM_VERIFICATION_MATRIX.md` |
 | G-05 | 剩余风险登记 | P1 | done | `REMAINING_RISK_REGISTER.md` |
 | G-06 | 最终报告 | P0 | done | `PHASE5_FINAL_REPORT.md` |
+
+## 收尾轮新增（2026-11-19）
+
+| ID | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| H-01 | 五批 Commit（按依赖顺序） | done | `527136d` lock → `fdc2a9f` installer → `10267db` recovery → `6ba28d9` policy → `544fc1a` plugin |
+| I-01 | 隔离副本真实写入（apply/snapshot/restore/force/rollback/install/uninstall） | done（17/17） | `docs/phase5/ISOLATED_HOST_WRITE_VERIFICATION.md` |
+| I-02 | 真实宿主前后哈希比对 | done（IDENTICAL 21789） | `reports/phase5/isolated-real-host-{before,after}.txt` |
+| I-03 | 路径逃逸 / 符号链接 / junction 测试 | done | 同上 §6/§7 |
+| J-01 | Rules/Skills/Self-Config 加锁 | done | `tests/write-path-locks.test.ts` |
+| J-02 | Audit 并发（事务化 seq） | done（修复 UNIQUE 冲突） | 同上 |
+| K-01 | 推送 `phase5/verification` | **blocked** | 无 remote（`git push` exit 128） |
+| K-02 | GitHub Windows/Ubuntu/macOS CI | **not_verified** | 从未运行；且 matrix 无 macOS |

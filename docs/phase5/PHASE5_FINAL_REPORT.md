@@ -128,3 +128,58 @@
 ## J. 结论
 
 **Phase 5 = PARTIAL（高完成度）**：五个任务的实现与测试都真实完成，核心不变量（Plan/Apply/Verify 分离、Unknown 不伪装、Capability≠Sandbox、Backup≠Safe Recovery、跨进程互斥、权限不自授）已落到代码与测试里；但跨平台、真实 CI、OS 沙箱与若干并发入口仍未验证/未接入，不得对外宣称"生产就绪"。
+
+---
+
+# 附：Phase 5 收尾轮（2026-11-19 晚）
+
+授权范围：五批 Commit、隔离副本写入验证、P2-13、GitHub 推送与 CI。
+
+## 1. 五批 Commit（按依赖顺序，均已单独验证可编译 + 测试通过）
+
+| 顺序 | Hash | 内容 | 独立 worktree 验证 |
+| --- | --- | --- | --- |
+| 1 | `527136d` | T-037 跨进程锁 + 接线（含 host/worker 文件，原因见该 commit message） | tsc 0；34 tests 通过 |
+| 2 | `fdc2a9f` | T-035 安装器 + 打包 + CI + lint | tsc 0；19 tests 通过 |
+| 3 | `10267db` | P2-08 恢复冲突 + force 授权（api/cli/acceptance） | tsc 0；28 tests 通过 |
+| 4 | `6ba28d9` | P2-10 权限层级 + app 集成 | tsc 0；37 tests 通过 |
+| 5 | `544fc1a` | T-036 插件进程隔离 + 报告 | 全量 255 tests |
+| 收尾 | `7ad9591` | 锁测试报告 + lint 修复 | — |
+
+> 偏差说明（按要求声明，未破坏结构）：`snapshot.ts` / `api/server.ts` / `cli/main.ts` / `host.ts` 各自承载两个任务的内容；按"最早需要它的 commit"归属，后续 commit 在 message 中注明。
+
+## 2. 隔离副本真实写入验证
+
+**17/17 通过**（`docs/phase5/ISOLATED_HOST_WRITE_VERIFICATION.md`）：
+副本与真实宿主 `app/` 树哈希一致（21788 文件 / 473MB）；pack apply → 快照 → 冲突阻止 → force 恢复 → 回滚全部只写副本；junction 不被跟随；安装/卸载在隔离目录完成。
+**真实宿主 21,789 条记录前后逐条一致，asar SHA256 未变。**
+
+## 3. P2-13 写入口锁
+
+Rules / Skills / Self-Config 已接入 `withWriteGuard`；Audit 改为 `BEGIN IMMEDIATE` 事务化（修复了真实的 `UNIQUE constraint failed: audit.seq` 并发缺陷）。
+6 个测试（真实子进程 + 3 进程并发审计）全部通过。
+**仍为 PARTIAL**：`prune`、备份 GC、外部写入未覆盖。
+
+## 4. GitHub 推送与 CI
+
+**BLOCKED**：本机 `git remote -v` 为空，`git push` exit 128（无 remote、无凭据）。
+本地已创建分支 `phase5/verification`（指向 `7ad9591`）。
+Workflow 经 YAML 解析器验证有效、无 secrets、无部署步骤。
+平台状态：`LOCAL_WINDOWS_11_VERIFIED` ✅；`GITHUB_WINDOWS/UBUNTU/MACOS_RUNNER_VERIFIED` 全部 **NOT_VERIFIED**（workflow 亦无 macOS job）。
+
+## 5. 最新数字
+
+| 项 | 值 |
+| --- | --- |
+| Tests | **261 / 56 suites / 0 fail / 0 skip** |
+| TypeScript | 0 错误 |
+| ESLint | 0 error |
+| Acceptance | 14/14 |
+| 本地 CI | 8/8 |
+| 隔离写入 | 17/17 |
+| 真实宿主哈希 | 未变（21789 条） |
+| Commit | 6 个（5 任务 + 1 收尾） |
+
+## 6. 结论
+
+Phase 5 仍为 **PARTIAL**：五个任务的实现与验证完成，隔离写入首次得到真实证据；但 GitHub CI 与 macOS/Linux 平台验证被环境阻塞，T-037 对全部写入口的覆盖仍不完整。
